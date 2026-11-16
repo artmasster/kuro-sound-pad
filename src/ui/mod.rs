@@ -22,6 +22,9 @@ use std::time::{Duration, Instant};
 pub use view::{fonts, FONT};
 
 pub const WINDOW: Size = Size::new(1280.0, 800.0);
+/// How often the things that move (progress strips, the meter, the clock) are brought up to date. Thirty times a
+/// second looks smooth for these and costs half of following the screen's own rate (or a quarter, at 120 Hz).
+const TICK: Duration = Duration::from_millis(33);
 pub const MIN_WINDOW: Size = Size::new(1120.0, 700.0);
 
 /// What a captured key is for.
@@ -97,7 +100,6 @@ pub enum Message {
     Add(usize),
     StopAll,
 
-    Master(u8),
     KnobDown,
     KnobHover(bool),
     KnobWheel(mouse::ScrollDelta),
@@ -167,7 +169,9 @@ pub struct App {
     pub drag: Option<Drag>,
     /// The master knob while it is being turned: the cursor height and the volume when it was grabbed.
     pub knob: Option<(Option<f32>, u8)>,
-    pub knob_hover: bool,
+    knob_hover: bool,
+    /// The knob's picture for the current volume, drawn again only when it changes.
+    pub knob_picture: iced::widget::svg::Handle,
     /// A file dropped from outside a moment ago and the pad it went to: more files of the same drop follow it.
     last_drop: Option<(Instant, usize)>,
     pub capture: Option<Target>,
@@ -258,16 +262,24 @@ fn save_png(path: &std::path::Path, shot: &window::Screenshot) -> Result<(), Box
 impl App {
     /// What to do right after the window opens: nothing, unless a development aid was asked for.
     pub fn boot(&mut self) -> Task<Message> {
-        // `KURO_AUTOPLAY=0,1,0,stop,2` plays those pads half a second apart, as hotkeys would.
+        // `KURO_AUTOPLAY=0,1,h5,h6,stop,2` runs those steps half a second apart: a number plays that pad as its
+        // hotkey would, `h5` moves the mouse onto pad 5 as far as the window can tell, anything else stops all.
         if let Ok(script) = std::env::var("KURO_AUTOPLAY") {
-            let audio = self.audio.clone();
+            let (audio, events) = (self.audio.clone(), self.events.clone());
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(1500));
+                let mut over = None;
                 for step in script.split(',') {
-                    let _ = match step.parse() {
-                        Ok(i) => audio.send(Cmd::Trigger(i)),
-                        Err(_) => audio.send(Cmd::StopAll),
-                    };
+                    if let Some(i) = step.strip_prefix('h').and_then(|n| n.parse::<usize>().ok()).filter(|i| *i < PADS) {
+                        if let Some(old) = over.replace(i) {
+                            let _ = events.unbounded_send(Message::PadHover(old, false));
+                        }
+                        let _ = events.unbounded_send(Message::PadHover(i, true));
+                    } else if let Some(i) = step.parse().ok().filter(|i| *i < PADS) {
+                        let _ = audio.send(Cmd::Trigger(i));
+                    } else {
+                        let _ = audio.send(Cmd::StopAll);
+                    }
                     std::thread::sleep(Duration::from_millis(500));
                 }
             });
@@ -299,9 +311,11 @@ impl App {
                     self.capture = Some(Target::Pad(5));
                 }
                 "drag" => {
+                    self.hover = Some(9);
                     self.drag = Some(Drag { item: Carried::Library(1), origin: Some(Point::ORIGIN), at: Point::new(640.0, 420.0), moving: true });
                 }
                 "swap" => {
+                    self.hover = Some(14);
                     self.drag = Some(Drag { item: Carried::Pad(0), origin: Some(Point::ORIGIN), at: Point::new(820.0, 560.0), moving: true });
                 }
                 "error" => self.say("ไม่พบไฟล์เสียงของ \"Vine Boom\"", true),
@@ -334,6 +348,7 @@ impl App {
         hotkey::init(audio.clone(), move |c| {
             let _ = capture_tx.unbounded_send(Message::Captured(c));
         });
+        let settings_volume = settings.master_volume;
         let mut app = Self {
             modal: settings.global_hotkeys.is_none().then_some(Modal::Welcome),
             settings,
@@ -354,6 +369,7 @@ impl App {
             drag: None,
             knob: None,
             knob_hover: false,
+            knob_picture: iced::widget::svg::Handle::from_memory(knob::svg(settings_volume, false)),
             last_drop: None,
             capture: None,
             query: String::new(),
@@ -394,9 +410,10 @@ impl App {
             return Subscription::none();
         }
         let mut subs = vec![Subscription::run(events), input];
-        // Frames drive the progress strips, the meter and the notice's timeout; nothing moves otherwise.
+        // The tick drives the progress strips, the meter and the notice's timeout; nothing moves otherwise, and then
+        // the window does no work at all.
         if !self.playing.is_empty() || self.notice.is_some() || self.shot_in.is_some() || self.meter.iter().any(|m| *m > 0.001) {
-            subs.push(window::frames().map(Message::Frame));
+            subs.push(iced::time::every(TICK).map(Message::Frame));
         }
         Subscription::batch(subs)
     }
@@ -446,6 +463,25 @@ impl App {
         })
     }
 
+    fn set_master(&mut self, v: u8) {
+        if v != self.settings.master_volume {
+            self.settings.master_volume = v;
+            self.send(Cmd::Master(v as f32 / 100.0));
+            self.draw_knob();
+        }
+    }
+
+    fn draw_knob(&mut self) {
+        let hot = self.knob_hover || self.knob.is_some();
+        self.knob_picture = iced::widget::svg::Handle::from_memory(knob::svg(self.settings.master_volume, hot));
+    }
+
+    /// The pad a drag would land on: the one the cursor is over, as the pads themselves report it.
+    pub fn drop_target(&self) -> Option<usize> {
+        let drag = self.drag.filter(|d| d.moving)?;
+        self.hover.filter(|i| drag.item != Carried::Pad(*i))
+    }
+
     fn sync_pad(&mut self, i: usize) {
         self.loads[i] += 1;
         self.seconds[i] = None;
@@ -486,6 +522,7 @@ impl App {
 
     fn sync_everything(&mut self) {
         self.send(Cmd::Master(self.settings.master_volume as f32 / 100.0));
+        self.draw_knob();
         self.sync_outputs();
         for i in 0..PADS {
             self.sync_pad(i);
@@ -704,10 +741,7 @@ impl App {
                 if let Some((from, start)) = &mut self.knob {
                     let y = *from.get_or_insert(at.y);
                     let v = knob::turned(*start, y - at.y);
-                    if v != self.settings.master_volume {
-                        self.settings.master_volume = v;
-                        self.send(Cmd::Master(v as f32 / 100.0));
-                    }
+                    self.set_master(v);
                 }
                 if let Some(drag) = &mut self.drag {
                     drag.at = at;
@@ -723,10 +757,11 @@ impl App {
             }
             Message::Released => {
                 if self.knob.take().is_some() {
+                    self.draw_knob();
                     self.save();
                 }
+                let target = self.drop_target();
                 if let Some(drag) = self.drag.take() {
-                    let target = view::pad_at(self.window, drag.at);
                     match (drag.moving, drag.item, target) {
                         (true, Carried::Library(n), Some(i)) => {
                             if let Some(sound) = self.library_sound(n) {
@@ -734,7 +769,7 @@ impl App {
                                 self.selected = Some(i);
                             }
                         }
-                        (true, Carried::Pad(from), Some(to)) if from != to => {
+                        (true, Carried::Pad(from), Some(to)) => {
                             self.send(Cmd::Stop(Slot::Pad(from)));
                             self.send(Cmd::Stop(Slot::Pad(to)));
                             self.settings.swap_pads(from, to);
@@ -804,20 +839,20 @@ impl App {
             },
             Message::StopAll => self.send(Cmd::StopAll),
 
-            Message::Master(v) => {
-                self.settings.master_volume = v;
-                self.send(Cmd::Master(v as f32 / 100.0));
+            Message::KnobDown => {
+                self.knob = Some((None, self.settings.master_volume));
+                self.draw_knob();
             }
-            Message::KnobDown => self.knob = Some((None, self.settings.master_volume)),
-            Message::KnobHover(on) => self.knob_hover = on,
+            Message::KnobHover(on) => {
+                self.knob_hover = on;
+                self.draw_knob();
+            }
             Message::KnobWheel(delta) => {
                 let up = match delta {
                     mouse::ScrollDelta::Lines { y, .. } | mouse::ScrollDelta::Pixels { y, .. } => y > 0.0,
                 };
                 let v = self.settings.master_volume;
-                let v = if up { (v + 5).min(100) } else { v.saturating_sub(5) };
-                self.settings.master_volume = v;
-                self.send(Cmd::Master(v as f32 / 100.0));
+                self.set_master(if up { (v + 5).min(100) } else { v.saturating_sub(5) });
                 self.save();
             }
             Message::PadVolume(i, v) => {

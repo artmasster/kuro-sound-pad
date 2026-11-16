@@ -2,7 +2,7 @@
 //! display. Everything here is colours and widget styles; the layout is in `view.rs`.
 use iced::border::Radius;
 use iced::widget::{button, container, pick_list, progress_bar, scrollable, slider, text_input, toggler};
-use iced::{overlay::menu, Background, Border, Color, Gradient, Shadow, Vector};
+use iced::{overlay::menu, Background, Border, Color, Gradient, Shadow};
 use std::f32::consts::PI;
 
 pub const fn rgb(hex: u32) -> Color {
@@ -27,15 +27,18 @@ pub fn mix(a: Color, b: Color, t: f32) -> Color {
     }
 }
 
-/// The chassis between the panels.
-pub const CHASSIS: Color = rgb(0x08080A);
-pub const PANEL_TOP: Color = rgb(0x19191C);
-pub const PANEL_BOTTOM: Color = rgb(0x111113);
+/// The chassis: the window's own background, which costs nothing to repaint. Whatever moves (the pads' strips, the
+/// display) sits directly on it, never on a large plate: the software renderer repaints every widget under a
+/// changed spot in full, so a big plate under a moving strip would be painted whole thirty times a second.
+pub const CHASSIS: Color = rgb(0x0B0B0D);
+/// The plates that hold the parts that rarely change (the library, the settings). Flat: a gradient this large is
+/// slow to paint.
+pub const PLATE: Color = rgb(0x151517);
 /// A hole in a panel: fields, list rows, the grooves of faders.
 pub const WELL: Color = rgb(0x0A0A0C);
 pub const EDGE: Color = rgb(0x000000);
 /// The light catching the top of a raised part.
-pub const RIM: Color = rgb(0x2E2E33);
+pub const RIM: Color = rgb(0x26262A);
 pub const KEY_TOP: Color = rgb(0x2B2C31);
 pub const KEY_BOTTOM: Color = rgb(0x1C1D21);
 /// Silk-screen print.
@@ -44,8 +47,7 @@ pub const LABEL: Color = rgb(0x85858E);
 pub const FAINT: Color = rgb(0x55555D);
 pub const AMBER: Color = rgb(0xFFB627);
 pub const AMBER_DIM: Color = rgb(0x8F6A22);
-pub const LCD_TOP: Color = rgb(0x0B0904);
-pub const LCD_BOTTOM: Color = rgb(0x17120A);
+pub const LCD: Color = rgb(0x110D06);
 pub const RED: Color = rgb(0xFF4438);
 pub const GREEN: Color = rgb(0x3DDC84);
 
@@ -76,12 +78,19 @@ fn down(top: Color, bottom: Color) -> Background {
     Gradient::Linear(iced::gradient::Linear::new(PI).add_stop(0.0, top).add_stop(1.0, bottom)).into()
 }
 
-fn drop(y: f32, blur: f32, a: f32) -> Shadow {
-    Shadow { color: alpha(Color::BLACK, a), offset: Vector::new(0.0, y), blur_radius: blur }
-}
+// No widget here casts a shadow, on purpose. The software renderer repaints only the part of the window that changed,
+// but it paints a shadow over the whole of its widget, unclipped: every repaint of a small part (a hover, a progress
+// strip) laid the shadow again over everything else inside that widget, until the pads sank into black or a glow
+// burned out. Depth comes from gradients and edges; light around a widget is a ring drawn as a widget of its own.
+const FLAT: Shadow = Shadow { color: Color::TRANSPARENT, offset: iced::Vector::ZERO, blur_radius: 0.0 };
 
-fn glow(c: Color, blur: f32, a: f32) -> Shadow {
-    Shadow { color: alpha(c, a), offset: Vector::ZERO, blur_radius: blur }
+/// A soft ring of light around a widget: the frame the widget sits in, slightly larger than it.
+pub fn halo(c: Color, strength: f32) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_| container::Style {
+        background: (strength > 0.0).then(|| alpha(c, strength).into()),
+        border: border(alpha(c, strength * 0.6), if strength > 0.0 { 1.0 } else { 0.0 }, 15.0),
+        ..Default::default()
+    }
 }
 
 pub fn fill(c: Color) -> impl Fn(&iced::Theme) -> container::Style {
@@ -96,24 +105,14 @@ pub fn dot(c: Color, radius: f32) -> impl Fn(&iced::Theme) -> container::Style {
 pub fn lamp(c: Color, on: bool) -> impl Fn(&iced::Theme) -> container::Style {
     move |_| container::Style {
         background: Some(if on { c } else { mix(c, Color::BLACK, 0.78) }.into()),
-        border: border(alpha(Color::BLACK, 0.8), 1.0, 99.0),
-        shadow: if on { glow(c, 8.0, 0.75) } else { Shadow::default() },
+        border: border(if on { mix(c, Color::WHITE, 0.45) } else { alpha(Color::BLACK, 0.8) }, 1.0, 99.0),
         ..Default::default()
     }
 }
 
-pub fn chassis(_: &iced::Theme) -> container::Style {
-    container::Style { background: Some(down(rgb(0x0C0C0E), CHASSIS)), text_color: Some(PRINT), ..Default::default() }
-}
-
-/// A plate screwed onto the chassis.
+/// A plate on the chassis.
 pub fn panel(_: &iced::Theme) -> container::Style {
-    container::Style {
-        background: Some(down(PANEL_TOP, PANEL_BOTTOM)),
-        border: border(RIM, 1.0, 10.0),
-        shadow: drop(2.0, 6.0, 0.7),
-        text_color: Some(PRINT),
-    }
+    container::Style { background: Some(PLATE.into()), border: border(RIM, 1.0, 10.0), shadow: FLAT, text_color: Some(PRINT) }
 }
 
 /// A recess in a plate.
@@ -123,10 +122,10 @@ pub fn well(_: &iced::Theme) -> container::Style {
 
 pub fn lcd(_: &iced::Theme) -> container::Style {
     container::Style {
-        background: Some(down(LCD_TOP, LCD_BOTTOM)),
-        border: border(EDGE, 2.0, 8.0),
+        background: Some(LCD.into()),
+        border: border(rgb(0x2A2418), 1.0, 8.0),
         text_color: Some(AMBER),
-        shadow: glow(AMBER, 14.0, 0.08),
+        shadow: FLAT,
     }
 }
 
@@ -135,7 +134,7 @@ pub fn dialog(_: &iced::Theme) -> container::Style {
         background: Some(down(rgb(0x1D1D21), rgb(0x131315))),
         border: border(rgb(0x3A3A40), 1.0, 12.0),
         text_color: Some(PRINT),
-        shadow: drop(18.0, 50.0, 0.8),
+        shadow: FLAT,
     }
 }
 
@@ -149,7 +148,7 @@ pub fn ghost(c: Color) -> impl Fn(&iced::Theme) -> container::Style {
         background: Some(down(KEY_TOP, KEY_BOTTOM)),
         border: border(c, 1.5, 8.0),
         text_color: Some(PRINT),
-        shadow: drop(6.0, 16.0, 0.8),
+        shadow: FLAT,
     }
 }
 
@@ -202,19 +201,10 @@ pub fn pad(color: Color, look: PadLook) -> impl Fn(&iced::Theme) -> container::S
         } else {
             (rgb(0x26262A), 1.0)
         };
-        let shadow = if look.playing {
-            glow(color, 26.0, 0.55)
-        } else if look.target {
-            glow(PRINT, 16.0, 0.3)
-        } else if look.pressed || !look.filled {
-            Shadow::default()
-        } else {
-            drop(3.0, 6.0, 0.8)
-        };
         container::Style {
             background: Some(down(top, bottom)),
             border: border(line, width, 12.0),
-            shadow,
+            shadow: FLAT,
             text_color: Some(if look.lifted { alpha(PRINT, 0.35) } else { PRINT }),
         }
     }
@@ -233,17 +223,18 @@ pub type ButtonStyle = Box<dyn Fn(&iced::Theme, button::Status) -> button::Style
 
 fn key(top: Color, bottom: Color, text: Color, line: Color, radius: f32) -> ButtonStyle {
     Box::new(move |_, status| {
-        let (t, b, shadow) = match status {
-            button::Status::Hovered => (mix(top, Color::WHITE, 0.08), mix(bottom, Color::WHITE, 0.06), drop(2.0, 4.0, 0.7)),
-            button::Status::Pressed => (mix(bottom, Color::BLACK, 0.2), mix(top, Color::BLACK, 0.2), Shadow::default()),
-            _ => (top, bottom, drop(2.0, 4.0, 0.7)),
+        let (t, b) = match status {
+            button::Status::Hovered => (mix(top, Color::WHITE, 0.08), mix(bottom, Color::WHITE, 0.06)),
+            // Pushed in: the light comes from below.
+            button::Status::Pressed => (mix(bottom, Color::BLACK, 0.2), mix(top, Color::BLACK, 0.2)),
+            _ => (top, bottom),
         };
         let fade = if matches!(status, button::Status::Disabled) { 0.4 } else { 1.0 };
         button::Style {
             background: Some(down(alpha(t, fade), alpha(b, fade))),
             text_color: alpha(text, fade),
             border: border(line, 1.0, radius),
-            shadow,
+            shadow: FLAT,
         }
     })
 }
@@ -276,11 +267,11 @@ pub fn flat() -> ButtonStyle {
         }.into()),
         text_color: PRINT,
         border: border(Color::TRANSPARENT, 0.0, 5.0),
-        shadow: Shadow::default(),
+        shadow: FLAT,
     })
 }
 
-/// The big stop button; it glows while something plays.
+/// The big stop button; it lights up while something plays.
 pub fn stop(live: bool) -> ButtonStyle {
     Box::new(move |_, status| {
         let (top, bottom) = match (status, live) {
@@ -292,19 +283,19 @@ pub fn stop(live: bool) -> ButtonStyle {
         button::Style {
             background: Some(down(top, bottom)),
             text_color: Color::WHITE,
-            border: border(rgb(0x2A0605), 2.0, 12.0),
-            shadow: if live { glow(RED, 22.0, 0.6) } else { drop(3.0, 6.0, 0.8) },
+            border: border(if live { rgb(0xFFB3AB) } else { rgb(0x2A0605) }, 2.0, 12.0),
+            shadow: FLAT,
         }
     })
 }
 
-/// A round colour choice; the chosen one gets a ring and a halo.
+/// A round colour choice; the chosen one is lit and ringed.
 pub fn swatch(c: Color, chosen: bool) -> ButtonStyle {
     Box::new(move |_, status| button::Style {
         background: Some(if chosen || matches!(status, button::Status::Hovered) { c } else { mix(c, Color::BLACK, 0.45) }.into()),
         text_color: PRINT,
         border: border(if chosen { PRINT } else { EDGE }, if chosen { 2.0 } else { 1.0 }, 99.0),
-        shadow: if chosen { glow(c, 10.0, 0.8) } else { Shadow::default() },
+        shadow: FLAT,
     })
 }
 

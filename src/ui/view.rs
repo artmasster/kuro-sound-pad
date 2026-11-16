@@ -1,7 +1,6 @@
 //! What the window shows: one panel, like the top of a sampler. Display, master knob and stop along the top;
 //! the library on the left, the sixteen pads in the middle, the selected pad and the setup on the right.
 use super::icons::{self, icon};
-use super::knob;
 use super::style::{self, alpha, mix, PadLook};
 use super::{App, Carried, DeviceChoice, Message, Modal, Target};
 use crate::audio::Slot;
@@ -12,7 +11,7 @@ use iced::font::{Family, Weight};
 use iced::mouse::Interaction;
 use iced::widget::text::{Shaping, Wrapping};
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, opaque, pick_list, progress_bar, row,
+    button, center, column, container, horizontal_space, lazy, mouse_area, opaque, pick_list, progress_bar, row,
     scrollable, slider, stack, text, text_input, toggler, Column, Row, Space, Text,
 };
 use iced::{Alignment, Color, Element, Fill, Font, Padding, Point, Size};
@@ -40,11 +39,11 @@ type El<'a> = Element<'a, Message>;
 
 // The frame of the layout. `pad_at` works out from these where each pad is, so keep the view and it in step.
 const GAP: f32 = 10.0;
-const TOP: f32 = 92.0;
+const TOP: f32 = 80.0;
 const LEFT: f32 = 268.0;
 const RIGHT: f32 = 300.0;
-const GRID_INSET: f32 = 12.0;
-const PAD_GAP: f32 = 10.0;
+const GRID_INSET: f32 = 0.0;
+const PAD_GAP: f32 = 4.0;
 
 /// The pad under a point of the window, if any. The gaps between pads count for the nearest pad, so a drop that
 /// lands on a seam still goes somewhere.
@@ -96,7 +95,8 @@ fn key<'a>(icon_data: Option<&'static [u8]>, word: &'a str, color: Color) -> El<
 impl App {
     pub fn view(&self) -> El<'_> {
         let body = row![self.library_panel(), self.grid(), self.side()].spacing(GAP).height(Fill);
-        let base: El = container(column![self.top(), body].spacing(GAP)).padding(GAP).width(Fill).height(Fill).style(style::chassis).into();
+        // No background here: the window's own colour is the chassis.
+        let base: El = container(column![self.top(), body].spacing(GAP)).padding(GAP).width(Fill).height(Fill).into();
 
         let mut layers = stack![base];
         // What is being dragged follows the cursor.
@@ -145,11 +145,7 @@ impl App {
 
         let v = self.settings.master_volume;
         let master = row![
-            mouse_area(
-                iced::widget::svg(iced::widget::svg::Handle::from_memory(knob::svg(v, self.knob_hover || self.knob.is_some())))
-                    .width(72)
-                    .height(72)
-            )
+            mouse_area(iced::widget::svg(self.knob_picture.clone()).width(72).height(72))
             .on_press(Message::KnobDown)
             .on_scroll(Message::KnobWheel)
             .on_enter(Message::KnobHover(true))
@@ -178,12 +174,12 @@ impl App {
         .on_press(Message::StopAll)
         .style(style::stop(live));
 
+        // Straight on the chassis (see `style::CHASSIS`): the display changes many times a second.
         container(row![brand, self.display(), master, stop].spacing(18).align_y(Alignment::Center))
-            .padding(Padding::from([0, 16]))
+            .padding(Padding::from([0, 12]))
             .height(TOP)
             .width(Fill)
             .align_y(Vertical::Center)
-            .style(style::panel)
             .into()
     }
 
@@ -255,7 +251,7 @@ impl App {
             .align_y(Alignment::Center),
         )
         .padding(Padding::from([6, 16]))
-        .height(68)
+        .height(72)
         .width(Fill)
         .align_y(Vertical::Center)
         .style(style::lcd)
@@ -265,53 +261,65 @@ impl App {
     // ---- left: the library ------------------------------------------------------------------------------------
 
     fn library_panel(&self) -> El<'_> {
-        let query = self.query.trim().to_lowercase();
-        let mut list = Column::new().spacing(1);
-        let mut found = 0;
-        for (n, s) in self.library.iter().enumerate() {
-            if !(query.is_empty() || s.key.contains(&query) || s.id.to_string() == query) {
-                continue;
-            }
-            found += 1;
-            let playing = self.preview == Some(n);
-            let carried = self.drag.is_some_and(|d| d.moving && d.item == Carried::Library(n));
-            let lead: El = if playing {
-                container(icon(icons::STOP, 10.0, style::AMBER)).width(30).into()
-            } else {
-                t(format!("{:03}", s.id)).font(TECH).size(11).color(style::FAINT).width(30).into()
-            };
-            let name_color = if carried { style::FAINT } else if playing { style::AMBER } else { style::PRINT };
-            let item = row![
-                lead,
-                t(s.name.as_str()).size(13).color(name_color).width(Fill).wrapping(Wrapping::None),
-                button(icon(icons::PLUS, 11.0, style::LABEL)).padding(5).on_press(Message::Add(n)).style(style::flat()),
-            ]
-            .spacing(4)
-            .align_y(Alignment::Center);
-            list = list.push(
-                mouse_area(
-                    container(item)
-                        .padding(Padding { top: 1.0, right: 2.0, bottom: 1.0, left: 8.0 })
-                        .width(Fill)
-                        .clip(true)
-                        .style(style::row(playing, self.hover_row == Some(n))),
-                )
-                .on_press(Message::RowDown(n))
-                .on_enter(Message::RowHover(n, true))
-                .on_exit(Message::RowHover(n, false))
-                .interaction(Interaction::Grab),
-            );
-        }
-        let body: El = if found == 0 {
-            let why = if self.library.is_empty() { "ไม่พบโฟลเดอร์คลังเสียง (library) ข้างไฟล์โปรแกรม" } else { "ไม่พบเสียงที่ค้นหา" };
-            container(hint(why)).padding(12).center_x(Fill).height(Fill).into()
-        } else {
-            scrollable(container(list).padding(Padding { right: 10.0, ..Padding::ZERO })).height(Fill).style(style::scroll).into()
+        // The list is 288 rows. It is built again only when something it shows changes, not on every tick of a
+        // playing sound.
+        let carried = match self.drag {
+            Some(d) if d.moving => match d.item {
+                Carried::Library(n) => Some(n),
+                Carried::Pad(_) => None,
+            },
+            _ => None,
         };
+        let shown = (self.query.trim().to_lowercase(), self.preview, self.hover_row, carried, self.library.len());
+        let library = &self.library;
+        let list = lazy(shown, move |(query, preview, hover, carried, _)| -> Element<'static, Message> {
+            let mut list = Column::new().spacing(1);
+            let mut found = 0;
+            for (n, s) in library.iter().enumerate() {
+                if !(query.is_empty() || s.key.contains(query.as_str()) || s.id.to_string() == *query) {
+                    continue;
+                }
+                found += 1;
+                let playing = *preview == Some(n);
+                let lead: Element<'static, Message> = if playing {
+                    container(icon(icons::STOP, 10.0, style::AMBER)).width(30).into()
+                } else {
+                    t(format!("{:03}", s.id)).font(TECH).size(11).color(style::FAINT).width(30).into()
+                };
+                let name_color = if *carried == Some(n) { style::FAINT } else if playing { style::AMBER } else { style::PRINT };
+                let mut item = row![lead, t(s.name.clone()).size(13).color(name_color).width(Fill).wrapping(Wrapping::None)]
+                    .spacing(4)
+                    .height(24)
+                    .align_y(Alignment::Center);
+                // Only the row under the cursor carries the + button: 288 of them would be 288 more things to lay
+                // out and look at on every mouse move.
+                if *hover == Some(n) {
+                    item = item.push(button(icon(icons::PLUS, 11.0, style::PRINT)).padding(5).on_press(Message::Add(n)).style(style::flat()));
+                }
+                list = list.push(
+                    mouse_area(
+                        container(item)
+                            .padding(Padding { top: 0.0, right: 2.0, bottom: 0.0, left: 8.0 })
+                            .width(Fill)
+                            .style(style::row(playing, *hover == Some(n))),
+                    )
+                    .on_press(Message::RowDown(n))
+                    .on_enter(Message::RowHover(n, true))
+                    .on_exit(Message::RowHover(n, false))
+                    .interaction(Interaction::Grab),
+                );
+            }
+            if found == 0 {
+                let why = if library.is_empty() { "ไม่พบโฟลเดอร์คลังเสียง (library) ข้างไฟล์โปรแกรม" } else { "ไม่พบเสียงที่ค้นหา" };
+                container(hint(why)).padding(12).center_x(Fill).into()
+            } else {
+                container(list).padding(Padding { right: 10.0, ..Padding::ZERO }).into()
+            }
+        });
 
         container(
             column![
-                row![silk("LIBRARY"), horizontal_space(), t(format!("{found}")).font(TECH).size(11).color(style::FAINT)]
+                row![silk("LIBRARY"), horizontal_space(), t(format!("{}", self.library.len())).font(TECH).size(11).color(style::FAINT)]
                     .align_y(Alignment::Center),
                 text_input("ค้นหาเสียง…", &self.query)
                     .on_input(Message::Query)
@@ -320,7 +328,7 @@ impl App {
                     .size(13)
                     .font(FONT)
                     .style(style::input),
-                container(body).padding(4).height(Fill).width(Fill).style(style::well),
+                container(scrollable(list).height(Fill).style(style::scroll)).padding(4).height(Fill).width(Fill).style(style::well),
                 hint("กดเพื่อฟัง · ลากไปวางบนแผง · + ลงแผงว่าง"),
             ]
             .spacing(8),
@@ -343,7 +351,8 @@ impl App {
             }
             rows = rows.push(cells.height(Fill));
         }
-        container(rows).padding(GRID_INSET).width(Fill).height(Fill).style(style::panel).into()
+        // Straight on the chassis too: a playing pad's strip moves.
+        container(rows).padding(GRID_INSET).width(Fill).height(Fill).into()
     }
 
     fn pad(&self, i: usize) -> El<'_> {
@@ -355,9 +364,9 @@ impl App {
             filled: pad.sound.is_some(),
             playing: progress.is_some(),
             selected: self.selected == Some(i),
-            hover: self.hover == Some(i) && self.drag.is_none(),
+            hover: self.hover == Some(i) && moving.is_none(),
             pressed: self.drag.is_some_and(|d| !d.moving && d.item == Carried::Pad(i)),
-            target: moving.is_some_and(|d| d.item != Carried::Pad(i) && pad_at(self.window, d.at) == Some(i)),
+            target: self.drop_target() == Some(i),
             lifted: moving.is_some_and(|d| d.item == Carried::Pad(i)),
             broken: self.broken[i],
         };
@@ -414,7 +423,10 @@ impl App {
                 .into()
             }
         };
-        mouse_area(container(content).padding(10).width(Fill).height(Fill).style(style::pad(color, look)))
+        // The halo stands in for a glow: lit in the pad's colour while it plays, white where a drop would land.
+        let (ring, strength) = if look.target { (style::PRINT, 0.3) } else if look.playing { (color, 0.38) } else { (color, 0.0) };
+        let body = container(content).padding(10).width(Fill).height(Fill).style(style::pad(color, look));
+        mouse_area(container(body).padding(3).width(Fill).height(Fill).style(style::halo(ring, strength)))
             .on_press(Message::PadDown(i))
             .on_right_press(Message::PadSelect(i))
             .on_enter(Message::PadHover(i, true))

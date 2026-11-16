@@ -12,7 +12,7 @@ name = "kuro-sound-pad"
 path = "src/main.rs"
 
 [dependencies]
-iced = { version = "0.13", default-features = false, features = ["tiny-skia", "svg", "advanced"] }
+iced = { version = "0.13", default-features = false, features = ["tiny-skia", "svg", "advanced", "lazy", "smol"] }
 rodio = { version = "0.20", default-features = false, features = ["symphonia-all"] }
 rfd = { version = "0.15", default-features = false }
 serde = { version = "1", features = ["derive"] }
@@ -42,7 +42,8 @@ panic = "abort"
 strip = true
 
 [profile.dev]
-opt-level = 1
+# Test builds are used like the real thing; unoptimised, the software renderer is too slow to judge anything by.
+opt-level = 2
 
 [profile.dev.package."*"]
 opt-level = 2
