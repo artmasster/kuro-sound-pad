@@ -27,8 +27,20 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// Today's date where the user is. (The export's own time stamp is UTC; a file name is read by a person.)
+#[cfg(windows)]
+fn local_date() -> (i64, u32, u32) {
+    let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+    (t.wYear as i64, t.wMonth as u32, t.wDay as u32)
+}
+
+#[cfg(not(windows))]
+fn local_date() -> (i64, u32, u32) {
+    civil(now())
+}
+
 pub fn export_file_name() -> String {
-    let (y, m, d) = civil(now());
+    let (y, m, d) = local_date();
     format!("kuro-sound-pad-settings-{y:04}-{m:02}-{d:02}.json")
 }
 
@@ -281,6 +293,31 @@ mod tests {
             assert_eq!(imp.stop_key, Some(Hotkey::plain(0x59)));
             assert_eq!(imp.custom_volume_count(), 1);
         }
+    }
+
+    #[test]
+    fn what_is_exported_imports_again() {
+        let lib = library::load();
+        let mut s = Settings::default();
+        s.master_volume = 65;
+        s.pads[0].sound = Some(Sound { name: "Vine Boom".into(), source: Source::Library("2_vine-boom.mp3".into()) });
+        s.pads[0].volume = 40;
+        s.pads[0].color = Some(6);
+        s.pads[3].key = Some(Hotkey { vk: 0x41, ctrl: true, shift: false, alt: true });
+        s.stop_key = Some(Hotkey::plain(0x70));
+        let dir = std::env::temp_dir().join(format!("kuro-export-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(export_file_name());
+        export(&s, &path).unwrap();
+        let back = parse(&std::fs::read_to_string(&path).unwrap(), &lib).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(back.master_volume, 65);
+        assert_eq!(back.skipped, 0);
+        assert!(matches!(&back.pads[0].sound, Some((n, ImportedSound::Library(f))) if n == "Vine Boom" && f == "2_vine-boom.mp3"));
+        assert_eq!((back.pads[0].volume, back.pads[0].color), (40, Some(6)));
+        assert_eq!(back.pads[3].key, s.pads[3].key);
+        assert_eq!(back.pads[1].key, s.pads[1].key);
+        assert_eq!(back.stop_key, s.stop_key);
     }
 
     #[test]
