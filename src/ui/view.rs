@@ -597,7 +597,8 @@ impl App {
                 }
                 let found = matches.len();
                 let body: El = if found == 0 {
-                    center(hint("ไม่พบเสียงที่ค้นหา", p)).height(160).into()
+                    let why = if self.library.is_empty() { "ไม่พบโฟลเดอร์คลังเสียง (library) ข้างไฟล์โปรแกรม ลองติดตั้งใหม่" } else { "ไม่พบเสียงที่ค้นหา" };
+                    center(hint(why, p)).height(160).into()
                 } else {
                     scrollable(container(list).padding(Padding { right: 14.0, ..Padding::ZERO })).height(Fill).style(p.scroll()).into()
                 };

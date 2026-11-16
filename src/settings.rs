@@ -167,7 +167,7 @@ impl Settings {
 }
 
 pub fn data_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("KURO_DATA_DIR") {
+    if let Some(d) = std::env::var_os("KURO_DATA_DIR").filter(|d| !d.is_empty()) {
         return PathBuf::from(d);
     }
     let base = std::env::var_os("APPDATA")
@@ -188,7 +188,7 @@ pub fn sounds_dir() -> PathBuf {
 
 /// The bundled sounds: `library` next to the exe once installed, the repository's `assets/library` while developing.
 pub fn library_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("KURO_LIBRARY_DIR") {
+    if let Some(d) = std::env::var_os("KURO_LIBRARY_DIR").filter(|d| !d.is_empty()) {
         return PathBuf::from(d);
     }
     let installed = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("library")));
