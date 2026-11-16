@@ -1,24 +1,28 @@
 //! The window: state, what each message does, and the subscriptions that feed it.
 mod icons;
+mod knob;
+mod ops;
 mod style;
 mod view;
 
-use crate::audio::{self, Cmd, Slot};
+use crate::audio::{self, Cmd, Levels, Slot};
 use crate::hotkey::{self, Action, Captured};
 use crate::keys::Hotkey;
 use crate::library::{self, LibSound};
 use crate::settings::{self, Settings, Sound, Source, AUDIO_EXTENSIONS, PADS};
 use crate::transfer::{self, Imported};
 use iced::futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
-use iced::{event, keyboard, window, Event, Subscription, Task};
+use iced::{event, keyboard, mouse, window, Event, Point, Size, Subscription, Task};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub use style::Palette;
-pub use view::FONT;
+pub use view::{fonts, FONT};
+
+pub const WINDOW: Size = Size::new(1280.0, 800.0);
+pub const MIN_WINDOW: Size = Size::new(1120.0, 700.0);
 
 /// What a captured key is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,10 +33,6 @@ pub enum Target {
 
 #[derive(Clone, Debug)]
 pub enum Modal {
-    /// Picking from the bundled sounds, for a pad or (`None`) for the next free one.
-    Library(Option<usize>),
-    Shortcuts,
-    Rename(usize, String),
     Import(Box<Imported>),
     ConfirmClear,
     /// First run: how it works, and the question about hotkeys outside the app.
@@ -53,6 +53,23 @@ impl std::fmt::Display for DeviceChoice {
     }
 }
 
+/// What the mouse picked up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Carried {
+    /// A sound of the library, by position in the list.
+    Library(usize),
+    Pad(usize),
+}
+
+/// A press that may become a drag: it does once the cursor has moved a little.
+#[derive(Clone, Copy, Debug)]
+pub struct Drag {
+    pub item: Carried,
+    origin: Option<Point>,
+    pub at: Point,
+    pub moving: bool,
+}
+
 #[derive(Clone, Debug)]
 pub enum Message {
     Audio(audio::Event),
@@ -61,25 +78,46 @@ pub enum Message {
     /// A pad's sound has been measured: pad, which load of the pad it was for, seconds.
     Measured(usize, u32, Option<f32>),
     Focus(bool),
+    Resized(Size),
     Escape,
     Dropped(PathBuf),
+    Cursor(Point),
+    Released,
+    /// Whether a text field of this window has the keyboard.
+    Typing(bool),
 
-    PadPressed(usize),
+    PadDown(usize),
+    PadSelect(usize),
+    PadHover(usize, bool),
+    RowDown(usize),
+    RowHover(usize, bool),
+    /// Listen to a library sound, or stop listening to it.
+    Audition(usize),
+    /// Put a library sound on the next free pad.
+    Add(usize),
     StopAll,
-    EditMode(bool),
-    Open(Modal),
-    CloseModal,
-    /// Swallows a click (on a dialog, so it does not reach the backdrop).
-    Nothing,
 
     Master(u8),
+    KnobDown,
+    KnobHover(bool),
+    KnobWheel(mouse::ScrollDelta),
     PadVolume(usize, u8),
     Save,
+    PadColor(usize, u8),
+    PadName(usize, String),
+    PickFile(usize),
+    FilePicked(usize, Option<PathBuf>),
+    ClearPad(usize),
+    Query(String),
+    Unfocus,
+
     Output(DeviceChoice),
     Monitor(DeviceChoice),
     RefreshDevices,
     GlobalHotkeys(bool),
-    Theme(&'static str),
+    Capture(Target),
+    ClearKey(Target),
+    ResetKeys,
 
     Export,
     ExportTo(Option<PathBuf>),
@@ -87,27 +125,18 @@ pub enum Message {
     ImportFrom(Option<PathBuf>),
     ImportConfirm,
     ClearAll,
-
-    PickFile(usize),
-    FilePicked(usize, Option<PathBuf>),
-    ClearPad(usize),
-    Test(usize),
-    Query(String),
-    Preview(usize),
-    Choose(usize),
-
-    Capture(Target),
-    ClearKey(Target),
-    ResetKeys,
-    RenameInput(String),
-    RenameDone,
+    Open(Modal),
+    CloseModal,
+    /// Swallows a click (on a dialog, so it does not reach the backdrop).
+    Nothing,
     Welcome(bool),
 
     /// Development aid: a picture of the window, to check the layout without looking at the screen.
     Shot(window::Screenshot),
 }
 
-pub struct Toast {
+/// A line on the display that goes away by itself.
+pub struct Notice {
     pub text: String,
     pub error: bool,
     until: Instant,
@@ -117,9 +146,14 @@ pub struct App {
     pub settings: Settings,
     pub library: Vec<LibSound>,
     audio: Sender<Cmd>,
+    levels: Arc<Levels>,
+    /// The level meter, left and right, 0 to 1: jumps up with the sound, falls back slowly.
+    pub meter: [f32; 2],
     pub devices: Vec<String>,
-    /// When each playing sound started and how long it runs, if known.
+    /// When each playing sound started and how long it runs, if the file says.
     playing: HashMap<Slot, (Instant, Option<f32>)>,
+    /// The pad started last: the one the display follows.
+    pub latest: Option<usize>,
     /// Pads whose file could not be read.
     pub broken: [bool; PADS],
     /// How long each pad's sound runs, once measured.
@@ -128,6 +162,14 @@ pub struct App {
     loads: [u32; PADS],
     events: UnboundedSender<Message>,
     pub selected: Option<usize>,
+    pub hover: Option<usize>,
+    pub hover_row: Option<usize>,
+    pub drag: Option<Drag>,
+    /// The master knob while it is being turned: the cursor height and the volume when it was grabbed.
+    pub knob: Option<(Option<f32>, u8)>,
+    pub knob_hover: bool,
+    /// A file dropped from outside a moment ago and the pad it went to: more files of the same drop follow it.
+    last_drop: Option<(Instant, usize)>,
     pub capture: Option<Target>,
     pub modal: Option<Modal>,
     pub query: String,
@@ -135,10 +177,16 @@ pub struct App {
     pub preview: Option<usize>,
     preview_pending: u32,
     focused: bool,
-    pub toast: Option<Toast>,
+    typing: bool,
+    pub window: Size,
+    pub notice: Option<Notice>,
     pub now: Instant,
+    /// `KURO_LOG` is set: print what the audio thread reports and what the meter reads.
+    log: bool,
     /// Frames left until the development screenshot.
     shot_in: Option<u32>,
+    /// The screenshot is on its way: nothing may change until it is taken.
+    shooting: bool,
 }
 
 /// Events from the audio thread and the keyboard hook, on their way to the window.
@@ -153,12 +201,50 @@ fn on_event(event: Event, _status: event::Status, _window: window::Id) -> Option
     match event {
         Event::Window(window::Event::Focused) => Some(Message::Focus(true)),
         Event::Window(window::Event::Unfocused) => Some(Message::Focus(false)),
+        Event::Window(window::Event::Resized(size)) => Some(Message::Resized(size)),
         Event::Window(window::Event::FileDropped(path)) => Some(Message::Dropped(path)),
-        Event::Keyboard(keyboard::Event::KeyPressed { key: keyboard::Key::Named(keyboard::key::Named::Escape), .. }) => {
-            Some(Message::Escape)
-        }
+        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => Some(Message::Released),
+        Event::Keyboard(keyboard::Event::KeyPressed { key: keyboard::Key::Named(named), .. }) => match named {
+            keyboard::key::Named::Escape => Some(Message::Escape),
+            // Tab moves the keyboard between fields: ask again who has it.
+            keyboard::key::Named::Tab => Some(Message::Released),
+            _ => None,
+        },
         _ => None,
     }
+}
+
+/// The same, plus where the cursor is: only listened to while something is being dragged.
+fn on_event_dragging(event: Event, status: event::Status, window: window::Id) -> Option<Message> {
+    match event {
+        Event::Mouse(mouse::Event::CursorMoved { position }) => Some(Message::Cursor(position)),
+        other => on_event(other, status, window),
+    }
+}
+
+/// Where the cursor is inside this app's window right now, as fractions of its width and height. Windows reports no
+/// cursor movement while a file is dragged in from outside, so the drop asks the system directly.
+#[cfg(windows)]
+fn cursor_in_window() -> Option<(f32, f32)> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{POINT, RECT};
+    use windows::Win32::Graphics::Gdi::ScreenToClient;
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetClientRect, GetCursorPos};
+    unsafe {
+        let title: Vec<u16> = crate::TITLE.encode_utf16().chain([0]).collect();
+        let hwnd = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())).ok()?;
+        let mut p = POINT::default();
+        GetCursorPos(&mut p).ok()?;
+        ScreenToClient(hwnd, &mut p).ok().ok()?;
+        let mut r = RECT::default();
+        GetClientRect(hwnd, &mut r).ok()?;
+        (r.right > 0 && r.bottom > 0).then(|| (p.x as f32 / r.right as f32, p.y as f32 / r.bottom as f32))
+    }
+}
+
+#[cfg(not(windows))]
+fn cursor_in_window() -> Option<(f32, f32)> {
+    None
 }
 
 fn save_png(path: &std::path::Path, shot: &window::Screenshot) -> Result<(), Box<dyn std::error::Error>> {
@@ -170,10 +256,9 @@ fn save_png(path: &std::path::Path, shot: &window::Screenshot) -> Result<(), Box
 }
 
 impl App {
-    /// What to do right after the window opens: nothing, unless a screenshot was asked for (`KURO_SHOT=<png>`,
-    /// with `KURO_SHOT_STATE` naming the state to show).
+    /// What to do right after the window opens: nothing, unless a development aid was asked for.
     pub fn boot(&mut self) -> Task<Message> {
-        // Development aid: `KURO_AUTOPLAY=0,1,0,stop,2` plays those pads half a second apart, as hotkeys would.
+        // `KURO_AUTOPLAY=0,1,0,stop,2` plays those pads half a second apart, as hotkeys would.
         if let Ok(script) = std::env::var("KURO_AUTOPLAY") {
             let audio = self.audio.clone();
             std::thread::spawn(move || {
@@ -187,39 +272,42 @@ impl App {
                 }
             });
         }
+        // `KURO_SHOT=<png>` saves a picture of the window and quits; `KURO_SHOT_STATE` names what to show.
         if std::env::var_os("KURO_SHOT").is_none() {
             return Task::none();
         }
-        let state = std::env::var("KURO_SHOT_STATE").unwrap_or_default();
-        if let Some(theme) = std::env::var("KURO_SHOT_THEME").ok().filter(|t| !t.is_empty()) {
-            self.settings.theme = theme;
-        }
         let now = Instant::now();
-        for part in state.split(',') {
+        self.now = now;
+        self.modal = None;
+        for part in std::env::var("KURO_SHOT_STATE").unwrap_or_default().split(',') {
             match part {
-                "edit" => {
-                    self.settings.edit_mode = true;
-                    self.selected = Some(1);
-                }
-                "empty" => {
-                    self.settings.edit_mode = true;
-                    self.selected = Some(15);
-                }
+                "select" => self.selected = Some(1),
+                "empty" => self.selected = Some(15),
                 "playing" => {
-                    self.playing.insert(Slot::Pad(0), (now - Duration::from_millis(900), Some(2.0)));
-                    self.now = now;
+                    self.playing.insert(Slot::Pad(0), (now - Duration::from_millis(600), Some(1.3)));
+                    self.latest = Some(0);
+                    self.meter = [0.55, 0.4];
                 }
-                "library" => self.modal = Some(Modal::Library(None)),
-                "shortcuts" => {
-                    self.modal = Some(Modal::Shortcuts);
+                "preview" => {
+                    self.preview = Some(6);
+                    self.playing.insert(Slot::Preview, (now - Duration::from_millis(900), Some(2.4)));
+                    self.meter = [0.3, 0.3];
+                }
+                "search" => self.query = "ตบ".into(),
+                "capture" => {
+                    self.selected = Some(5);
                     self.capture = Some(Target::Pad(5));
                 }
+                "drag" => {
+                    self.drag = Some(Drag { item: Carried::Library(1), origin: Some(Point::ORIGIN), at: Point::new(640.0, 420.0), moving: true });
+                }
+                "swap" => {
+                    self.drag = Some(Drag { item: Carried::Pad(0), origin: Some(Point::ORIGIN), at: Point::new(820.0, 560.0), moving: true });
+                }
+                "error" => self.say("ไม่พบไฟล์เสียงของ \"Vine Boom\"", true),
                 "welcome" => self.modal = Some(Modal::Welcome),
                 "help" => self.modal = Some(Modal::Help),
                 "clear" => self.modal = Some(Modal::ConfirmClear),
-                "rename" => self.modal = Some(Modal::Rename(0, "Vine Boom".into())),
-                "toast" => self.say("เพิ่ม \"Vine Boom\" ลงแผง 3", false),
-                "none" => self.modal = None,
                 _ => {}
             }
         }
@@ -236,7 +324,7 @@ impl App {
         let audio_tx = tx.clone();
         // Development aid: `KURO_LOG=1` prints what the audio thread reports.
         let log = std::env::var_os("KURO_LOG").is_some();
-        let audio = audio::spawn(move |e| {
+        let (audio, levels) = audio::spawn(move |e| {
             if log {
                 eprintln!("audio: {e:?}");
             }
@@ -251,43 +339,63 @@ impl App {
             settings,
             library: library::load(),
             audio,
+            levels,
+            meter: [0.0; 2],
             devices: Vec::new(),
             playing: HashMap::new(),
+            latest: None,
             broken: [false; PADS],
             seconds: [None; PADS],
             loads: [0; PADS],
             events: tx,
             selected: None,
+            hover: None,
+            hover_row: None,
+            drag: None,
+            knob: None,
+            knob_hover: false,
+            last_drop: None,
             capture: None,
             query: String::new(),
             preview: None,
             preview_pending: 0,
             focused: true,
-            toast: None,
+            typing: false,
+            window: WINDOW,
+            notice: None,
             now: Instant::now(),
+            log,
             shot_in: None,
+            shooting: false,
         };
         app.send(Cmd::ListDevices);
         app.sync_everything();
         app
     }
 
-    pub fn palette(&self) -> Palette {
-        style::palette(&self.settings.theme)
-    }
-
     pub fn theme(&self) -> iced::Theme {
-        let p = self.palette();
         iced::Theme::custom(
-            p.id.to_string(),
-            iced::theme::Palette { background: p.bg, text: p.text, primary: p.accent, success: p.accent, danger: p.danger },
+            "kuro".to_string(),
+            iced::theme::Palette {
+                background: style::CHASSIS,
+                text: style::PRINT,
+                primary: style::AMBER,
+                success: style::GREEN,
+                danger: style::RED,
+            },
         )
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        let mut subs = vec![Subscription::run(events), event::listen_with(on_event)];
-        // Frames drive the progress bars and the toast's timeout; nothing moves otherwise.
-        if !self.playing.is_empty() || self.toast.is_some() || self.shot_in.is_some() {
+        let input = if self.drag.is_some() || self.knob.is_some() { event::listen_with(on_event_dragging) } else { event::listen_with(on_event) };
+        // A screenshot reads what was drawn last. A layout after that draw would leave it with text that no longer
+        // exists, so once the picture is ordered the window gets no more messages.
+        if self.shooting {
+            return Subscription::none();
+        }
+        let mut subs = vec![Subscription::run(events), input];
+        // Frames drive the progress strips, the meter and the notice's timeout; nothing moves otherwise.
+        if !self.playing.is_empty() || self.notice.is_some() || self.shot_in.is_some() || self.meter.iter().any(|m| *m > 0.001) {
             subs.push(window::frames().map(Message::Frame));
         }
         Subscription::batch(subs)
@@ -306,20 +414,35 @@ impl App {
     fn say(&mut self, text: impl Into<String>, error: bool) {
         let now = Instant::now();
         self.now = now;
-        self.toast = Some(Toast { text: text.into(), error, until: now + Duration::from_millis(if error { 4500 } else { 2600 }) });
+        self.notice = Some(Notice { text: text.into(), error, until: now + Duration::from_millis(if error { 5000 } else { 2800 }) });
     }
 
-    /// How far a playing sound is, 0 to 1; `None` when it is not playing. A sound of unknown length sweeps.
-    pub fn progress(&self, slot: Slot) -> Option<f32> {
+    pub fn is_playing(&self, slot: Slot) -> bool {
+        self.playing.contains_key(&slot)
+    }
+
+    pub fn anything_playing(&self) -> bool {
+        !self.playing.is_empty()
+    }
+
+    /// Seconds a playing sound has run and its length, if known; `None` when it is not playing.
+    pub fn clock(&self, slot: Slot) -> Option<(f32, Option<f32>)> {
         let (start, declared) = self.playing.get(&slot)?;
         let t = self.now.saturating_duration_since(*start).as_secs_f32();
         let measured = match slot {
             Slot::Pad(i) => self.seconds[i],
             Slot::Preview => None,
         };
-        Some(match measured.or(*declared) {
-            Some(s) if s > 0.0 => (t / s).clamp(0.0, 1.0),
-            _ => (t * 0.8).fract(),
+        let total = measured.or(*declared).filter(|s| *s > 0.0);
+        Some((total.map_or(t, |s| t.min(s)), total))
+    }
+
+    /// How far a playing sound is, 0 to 1. A sound of unknown length sweeps.
+    pub fn progress(&self, slot: Slot) -> Option<f32> {
+        let (t, total) = self.clock(slot)?;
+        Some(match total {
+            Some(s) => (t / s).clamp(0.0, 1.0),
+            None => (t * 0.8).fract(),
         })
     }
 
@@ -371,10 +494,10 @@ impl App {
         self.sync_hook();
     }
 
-    /// The hook listens while it may: everywhere once allowed, else only while this window has the focus. Open
-    /// dialogs hold the hotkeys back (there may be typing in them).
+    /// The hook listens while it may: everywhere once allowed, else only while this window has the focus. It holds
+    /// back while the user types into a field of this window or a dialog is open.
     fn sync_hook(&self) {
-        hotkey::set_paused(self.modal.is_some());
+        hotkey::set_paused(self.modal.is_some() || (self.typing && self.focused));
         hotkey::set_active(self.focused || self.settings.global_hotkeys == Some(true));
     }
 
@@ -385,10 +508,6 @@ impl App {
     }
 
     fn close_modal(&mut self) {
-        if matches!(self.modal, Some(Modal::Library(_))) {
-            self.send(Cmd::Stop(Slot::Preview));
-            self.preview = None;
-        }
         // The first-run question needs an answer, not a click outside.
         if !matches!(self.modal, Some(Modal::Welcome)) {
             self.modal = None;
@@ -405,25 +524,47 @@ impl App {
         self.save();
     }
 
-    /// Where a sound without a chosen pad goes: the selected pad while editing, if it is free; else the first free
-    /// one; else the selected one, replacing its sound.
+    fn first_free(&self) -> Option<usize> {
+        (0..PADS).find(|i| self.settings.pads[*i].sound.is_none())
+    }
+
+    /// Where a sound without a chosen pad goes: the selected pad if it is free, else the first free one.
     fn free_pad(&self) -> Option<usize> {
-        let free = |i: &usize| self.settings.pads[*i].sound.is_none();
-        let selected = self.selected.filter(|_| self.settings.edit_mode);
-        selected.filter(free).or_else(|| (0..PADS).find(free)).or(selected)
+        self.selected.filter(|i| self.settings.pads[*i].sound.is_none()).or_else(|| self.first_free())
+    }
+
+    fn library_sound(&self, n: usize) -> Option<Sound> {
+        let s = self.library.get(n)?;
+        Some(Sound { name: s.name.clone(), source: Source::Library(s.file.clone()) })
     }
 
     fn pick(&self, title: &str, json: bool) -> rfd::AsyncFileDialog {
         let d = rfd::AsyncFileDialog::new().set_title(title);
         if json {
-            d.add_filter("การตั้งค่า Sound Pad (JSON)", &["json"])
+            d.add_filter("การตั้งค่า Kuro Sound Pad (JSON)", &["json"])
         } else {
             d.add_filter("ไฟล์เสียง", &AUDIO_EXTENSIONS)
         }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
-        if !matches!(message, Message::Frame(_) | Message::Measured(..) | Message::Audio(_) | Message::Captured(_) | Message::Capture(_) | Message::Focus(true)) {
+        let passive = matches!(
+            message,
+            Message::Frame(_)
+                | Message::Measured(..)
+                | Message::Audio(_)
+                | Message::Captured(_)
+                | Message::Capture(_)
+                | Message::Focus(true)
+                | Message::Resized(_)
+                | Message::Cursor(_)
+                | Message::Released
+                | Message::Typing(_)
+                | Message::PadHover(..)
+                | Message::RowHover(..)
+                | Message::KnobHover(_)
+        );
+        if !passive {
             self.stop_capture();
         }
         let task = self.handle(message);
@@ -433,19 +574,33 @@ impl App {
 
     fn handle(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Frame(_) if self.shooting => {}
             Message::Frame(now) => {
                 if let Some(n) = &mut self.shot_in {
                     *n = n.saturating_sub(1);
                     if *n == 0 {
                         self.shot_in = None;
-                        return window::get_latest().and_then(window::screenshot).map(Message::Shot);
+                        self.shooting = true;
+                        // Long enough for the last frame to be drawn.
+                        return Task::future(async { std::thread::sleep(Duration::from_millis(400)) })
+                            .then(|()| window::get_latest())
+                            .and_then(window::screenshot)
+                            .map(Message::Shot);
                     }
-                    // Time stands still for the picture, so a "playing" pad shows the same progress every time.
+                    // Time stands still for the picture, so it shows the same thing every time.
                     return Task::none();
                 }
+                let dt = now.saturating_duration_since(self.now).as_secs_f32().min(0.1);
                 self.now = now;
-                if self.toast.as_ref().is_some_and(|t| t.until <= now) {
-                    self.toast = None;
+                let peaks = self.levels.take();
+                if self.log && peaks.iter().any(|p| *p > 0.0) {
+                    eprintln!("meter: {:.2} {:.2}", peaks[0], peaks[1]);
+                }
+                for (m, p) in self.meter.iter_mut().zip(peaks) {
+                    *m = p.max(*m - dt * 1.6).clamp(0.0, 1.0);
+                }
+                if self.notice.as_ref().is_some_and(|t| t.until <= now) {
+                    self.notice = None;
                 }
             }
             Message::Measured(i, load, seconds) => {
@@ -458,8 +613,9 @@ impl App {
                     let now = Instant::now();
                     self.now = now;
                     self.playing.insert(slot, (now, seconds));
-                    if slot == Slot::Preview {
-                        self.preview_pending = self.preview_pending.saturating_sub(1);
+                    match slot {
+                        Slot::Pad(i) => self.latest = Some(i),
+                        Slot::Preview => self.preview_pending = self.preview_pending.saturating_sub(1),
                     }
                 }
                 audio::Event::Ended(slot) => {
@@ -478,95 +634,227 @@ impl App {
             },
             Message::Captured(c) => {
                 if let (Some(target), Captured::Key(key)) = (self.capture.take(), c) {
-                    let lost = self.settings.assign_key(match target {
-                        Target::Pad(i) => Some(i),
-                        Target::Stop => None,
-                    }, key);
+                    let lost = self.settings.assign_key(
+                        match target {
+                            Target::Pad(i) => Some(i),
+                            Target::Stop => None,
+                        },
+                        key,
+                    );
                     match lost {
-                        Some(Some(i)) => self.say(format!("ปุ่ม {} เคยเป็นของแผง {} ย้ายมาให้แล้ว", key.label(), i + 1), false),
-                        Some(None) => self.say(format!("ปุ่ม {} เคยเป็นปุ่มหยุดเสียง ย้ายมาให้แล้ว", key.label()), false),
+                        Some(Some(i)) => self.say(format!("ปุ่ม {} ย้ายมาจากแผง {}", key.label(), i + 1), false),
+                        Some(None) => self.say(format!("ปุ่ม {} ย้ายมาจากปุ่มหยุดเสียง", key.label()), false),
                         None => {}
                     }
                     self.sync_keys();
                     self.save();
                 }
             }
-            Message::Focus(f) => self.focused = f,
+            Message::Focus(f) => {
+                self.focused = f;
+                // (A window started for a screenshot may never get the focus: its staged drag stays.)
+                if !f && self.shot_in.is_none() && !self.shooting {
+                    self.drag = None;
+                    self.knob = None;
+                }
+            }
+            Message::Resized(size) => self.window = size,
+            Message::Typing(t) => self.typing = t,
+            Message::Unfocus => {
+                self.typing = false;
+                return ops::unfocus().discard();
+            }
             Message::Escape => {
+                self.drag = None;
+                self.typing = false;
                 if self.modal.is_some() {
                     self.close_modal();
                 } else {
                     self.selected = None;
                 }
+                return ops::unfocus().discard();
             }
             Message::Dropped(path) => {
                 // A settings file dropped on the window is an import.
                 if path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("json")) {
                     return self.handle(Message::ImportFrom(Some(path)));
                 }
-                match (self.free_pad(), settings::import_file(&path)) {
+                let now = Instant::now();
+                // Several files dropped together arrive one by one: the first goes where the cursor is, the rest
+                // onto the free pads after it.
+                let follow = self.last_drop.filter(|(at, _)| now.duration_since(*at) < Duration::from_millis(400));
+                let under = cursor_in_window()
+                    .and_then(|(x, y)| view::pad_at(self.window, Point::new(x * self.window.width, y * self.window.height)));
+                let target = match follow {
+                    Some((_, last)) => (last + 1..PADS).chain(0..last).find(|i| self.settings.pads[*i].sound.is_none()),
+                    None => under.or_else(|| self.free_pad()),
+                };
+                match (target, settings::import_file(&path)) {
                     (Some(i), Ok(sound)) => {
-                        self.say(format!("เพิ่ม \"{}\" ลงแผง {}", sound.name, i + 1), false);
+                        self.say(format!("\"{}\" → แผง {}", sound.name, i + 1), false);
                         self.set_sound(i, Some(sound));
-                        if self.settings.edit_mode {
-                            self.selected = Some(i);
-                        }
+                        self.selected = Some(i);
+                        self.last_drop = Some((now, i));
                     }
-                    (None, _) => self.say("ไม่มีแผงว่าง เปิดโหมดแก้ไขแล้วเลือกแผงที่จะแทนที่ก่อน", true),
+                    (None, _) => self.say("ไม่มีแผงว่าง ลากไฟล์ไปวางบนแผงที่จะแทนที่ได้เลย", true),
                     (_, Err(e)) => self.say(e, true),
                 }
             }
-
-            Message::PadPressed(i) => {
-                let filled = self.settings.pads[i].sound.is_some();
-                if self.settings.edit_mode {
-                    self.selected = Some(i);
-                } else if !filled {
-                    // An empty pad is an invitation to fill it.
-                    self.settings.edit_mode = true;
-                    self.selected = Some(i);
+            Message::Cursor(at) => {
+                if let Some((from, start)) = &mut self.knob {
+                    let y = *from.get_or_insert(at.y);
+                    let v = knob::turned(*start, y - at.y);
+                    if v != self.settings.master_volume {
+                        self.settings.master_volume = v;
+                        self.send(Cmd::Master(v as f32 / 100.0));
+                    }
+                }
+                if let Some(drag) = &mut self.drag {
+                    drag.at = at;
+                    let origin = *drag.origin.get_or_insert(at);
+                    if !drag.moving && (at.x - origin.x).hypot(at.y - origin.y) > 6.0 {
+                        drag.moving = true;
+                        // A pad starts playing when pressed; one that is being carried away should not.
+                        if let Carried::Pad(i) = drag.item {
+                            self.send(Cmd::Stop(Slot::Pad(i)));
+                        }
+                    }
+                }
+            }
+            Message::Released => {
+                if self.knob.take().is_some() {
                     self.save();
                 }
-                if filled {
+                if let Some(drag) = self.drag.take() {
+                    let target = view::pad_at(self.window, drag.at);
+                    match (drag.moving, drag.item, target) {
+                        (true, Carried::Library(n), Some(i)) => {
+                            if let Some(sound) = self.library_sound(n) {
+                                self.set_sound(i, Some(sound));
+                                self.selected = Some(i);
+                            }
+                        }
+                        (true, Carried::Pad(from), Some(to)) if from != to => {
+                            self.send(Cmd::Stop(Slot::Pad(from)));
+                            self.send(Cmd::Stop(Slot::Pad(to)));
+                            self.settings.swap_pads(from, to);
+                            self.sync_pad(from);
+                            self.sync_pad(to);
+                            self.selected = Some(to);
+                            self.save();
+                        }
+                        // A press on a library row that never moved is a click: listen to it.
+                        (false, Carried::Library(n), _) => return self.handle(Message::Audition(n)),
+                        _ => {}
+                    }
+                }
+                return ops::typing().map(Message::Typing);
+            }
+
+            Message::PadDown(i) => {
+                self.selected = Some(i);
+                if self.settings.pads[i].sound.is_some() {
                     self.send(Cmd::Trigger(i));
+                    self.drag = Some(Drag { item: Carried::Pad(i), origin: None, at: Point::ORIGIN, moving: false });
+                } else {
+                    // An empty pad asks for a sound.
+                    return self.handle(Message::PickFile(i));
                 }
             }
-            Message::Test(i) => self.send(Cmd::Trigger(i)),
+            Message::PadSelect(i) => self.selected = Some(i),
+            Message::PadHover(i, on) => {
+                if on {
+                    self.hover = Some(i);
+                } else if self.hover == Some(i) {
+                    self.hover = None;
+                }
+            }
+            Message::RowDown(n) => {
+                self.drag = Some(Drag { item: Carried::Library(n), origin: None, at: Point::ORIGIN, moving: false });
+            }
+            Message::RowHover(n, on) => {
+                if on {
+                    self.hover_row = Some(n);
+                } else if self.hover_row == Some(n) {
+                    self.hover_row = None;
+                }
+            }
+            Message::Audition(n) => {
+                if self.preview == Some(n) {
+                    self.send(Cmd::Stop(Slot::Preview));
+                } else if let Some(s) = self.library.get(n) {
+                    match std::fs::read(settings::library_dir().join(&s.file)) {
+                        Ok(bytes) => {
+                            self.preview = Some(n);
+                            self.preview_pending += 1;
+                            self.send(Cmd::Preview(bytes.into()));
+                        }
+                        Err(e) => self.say(format!("เปิดไฟล์เสียงไม่ได้: {e}"), true),
+                    }
+                }
+            }
+            Message::Add(n) => match (self.free_pad(), self.library_sound(n)) {
+                (Some(i), Some(sound)) => {
+                    self.say(format!("\"{}\" → แผง {}", sound.name, i + 1), false);
+                    self.set_sound(i, Some(sound));
+                    self.selected = Some(i);
+                }
+                (None, _) => self.say("ไม่มีแผงว่าง ลากเสียงไปวางบนแผงที่จะแทนที่ได้เลย", true),
+                _ => {}
+            },
             Message::StopAll => self.send(Cmd::StopAll),
-            Message::EditMode(on) => {
-                self.settings.edit_mode = on;
-                if !on {
-                    self.selected = None;
-                }
-                self.save();
-            }
-            Message::Open(modal) => {
-                if matches!(modal, Modal::Library(_)) {
-                    self.query.clear();
-                }
-                self.modal = Some(modal);
-                if matches!(self.modal, Some(Modal::Library(_))) {
-                    return iced::widget::text_input::focus(view::search_id());
-                }
-                if matches!(self.modal, Some(Modal::Rename(..))) {
-                    return Task::batch([
-                        iced::widget::text_input::focus(view::rename_id()),
-                        iced::widget::text_input::select_all(view::rename_id()),
-                    ]);
-                }
-            }
-            Message::CloseModal => self.close_modal(),
-            Message::Nothing => {}
 
             Message::Master(v) => {
                 self.settings.master_volume = v;
                 self.send(Cmd::Master(v as f32 / 100.0));
+            }
+            Message::KnobDown => self.knob = Some((None, self.settings.master_volume)),
+            Message::KnobHover(on) => self.knob_hover = on,
+            Message::KnobWheel(delta) => {
+                let up = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } | mouse::ScrollDelta::Pixels { y, .. } => y > 0.0,
+                };
+                let v = self.settings.master_volume;
+                let v = if up { (v + 5).min(100) } else { v.saturating_sub(5) };
+                self.settings.master_volume = v;
+                self.send(Cmd::Master(v as f32 / 100.0));
+                self.save();
             }
             Message::PadVolume(i, v) => {
                 self.settings.pads[i].volume = v;
                 self.send(Cmd::PadVolume(i, v as f32 / 100.0));
             }
             Message::Save => self.save(),
+            Message::PadColor(i, c) => {
+                self.settings.pads[i].color = Some(c);
+                self.save();
+            }
+            Message::PadName(i, name) => {
+                self.typing = true;
+                if let Some(sound) = self.settings.pads[i].sound.as_mut() {
+                    sound.name = name.chars().filter(|c| !c.is_control()).take(100).collect();
+                    self.save();
+                }
+            }
+            Message::PickFile(i) => {
+                let dialog = self.pick("เลือกไฟล์เสียง", false);
+                return Task::perform(async move { dialog.pick_file().await.map(|f| f.path().to_path_buf()) }, move |p| {
+                    Message::FilePicked(i, p)
+                });
+            }
+            Message::FilePicked(i, Some(path)) => match settings::import_file(&path) {
+                Ok(sound) => self.set_sound(i, Some(sound)),
+                Err(e) => self.say(e, true),
+            },
+            Message::ClearPad(i) => {
+                self.settings.pads[i].color = None;
+                self.set_sound(i, None);
+            }
+            Message::Query(q) => {
+                self.typing = true;
+                self.query = q;
+            }
+
             Message::Output(c) => {
                 self.settings.output_device = c.name;
                 self.sync_outputs();
@@ -585,9 +873,27 @@ impl App {
                 self.settings.global_hotkeys = Some(on);
                 self.save();
             }
-            Message::Theme(id) => {
-                self.settings.theme = id.to_string();
+            Message::Capture(target) => {
+                if self.capture == Some(target) {
+                    self.stop_capture();
+                } else {
+                    self.capture = Some(target);
+                    hotkey::set_capturing(true);
+                }
+            }
+            Message::ClearKey(target) => {
+                match target {
+                    Target::Pad(i) => self.settings.pads[i].key = None,
+                    Target::Stop => self.settings.stop_key = None,
+                }
+                self.sync_keys();
                 self.save();
+            }
+            Message::ResetKeys => {
+                self.settings.reset_keys();
+                self.sync_keys();
+                self.save();
+                self.say("คืนปุ่มลัดเป็นค่าเริ่มต้นแล้ว", false);
             }
 
             Message::Export => {
@@ -633,6 +939,7 @@ impl App {
                 for p in &mut self.settings.pads {
                     p.sound = None;
                     p.volume = 100;
+                    p.color = None;
                 }
                 self.selected = None;
                 self.sync_everything();
@@ -640,93 +947,15 @@ impl App {
                 self.settings.collect_garbage();
                 self.say("ล้างแผงเสียงทั้งหมดแล้ว", false);
             }
-
-            Message::PickFile(i) => {
-                let dialog = self.pick("เลือกไฟล์เสียง", false);
-                return Task::perform(async move { dialog.pick_file().await.map(|f| f.path().to_path_buf()) }, move |p| {
-                    Message::FilePicked(i, p)
-                });
-            }
-            Message::FilePicked(i, Some(path)) => match settings::import_file(&path) {
-                Ok(sound) => self.set_sound(i, Some(sound)),
-                Err(e) => self.say(e, true),
-            },
-            Message::ClearPad(i) => self.set_sound(i, None),
-            Message::Query(q) => self.query = q,
-            Message::Preview(n) => {
-                if self.preview == Some(n) {
-                    self.send(Cmd::Stop(Slot::Preview));
-                } else if let Some(s) = self.library.get(n) {
-                    match std::fs::read(settings::library_dir().join(&s.file)) {
-                        Ok(bytes) => {
-                            self.preview = Some(n);
-                            self.preview_pending += 1;
-                            self.send(Cmd::Preview(bytes.into()));
-                        }
-                        Err(e) => self.say(format!("เปิดไฟล์เสียงไม่ได้: {e}"), true),
-                    }
-                }
-            }
-            Message::Choose(n) => {
-                let target = match self.modal {
-                    Some(Modal::Library(Some(i))) => Some(i),
-                    _ => self.free_pad(),
-                };
-                let (Some(i), Some(s)) = (target, self.library.get(n)) else {
-                    self.say("ไม่มีแผงว่าง เปิดโหมดแก้ไขแล้วเลือกแผงที่จะแทนที่ก่อน", true);
-                    return Task::none();
-                };
-                let sound = Sound { name: s.name.clone(), source: Source::Library(s.file.clone()) };
-                if matches!(self.modal, Some(Modal::Library(Some(_)))) {
-                    self.close_modal();
-                } else {
-                    self.say(format!("เพิ่ม \"{}\" ลงแผง {}", sound.name, i + 1), false);
-                }
-                self.set_sound(i, Some(sound));
-            }
-
-            Message::Capture(target) => {
-                if self.capture == Some(target) {
-                    self.stop_capture();
-                } else {
-                    self.capture = Some(target);
-                    hotkey::set_capturing(true);
-                }
-            }
-            Message::ClearKey(target) => {
-                match target {
-                    Target::Pad(i) => self.settings.pads[i].key = None,
-                    Target::Stop => self.settings.stop_key = None,
-                }
-                self.sync_keys();
-                self.save();
-            }
-            Message::ResetKeys => {
-                self.settings.reset_keys();
-                self.sync_keys();
-                self.save();
-                self.say("คืนปุ่มลัดเป็นค่าเริ่มต้นแล้ว", false);
-            }
-            Message::RenameInput(text) => {
-                if let Some(Modal::Rename(_, name)) = &mut self.modal {
-                    *name = text;
-                }
-            }
-            Message::RenameDone => {
-                if let Some(Modal::Rename(i, name)) = self.modal.take() {
-                    let name = settings::clean_name(&name);
-                    if let (false, Some(sound)) = (name.is_empty(), self.settings.pads[i].sound.as_mut()) {
-                        sound.name = name;
-                        self.save();
-                    }
-                }
-            }
+            Message::Open(modal) => self.modal = Some(modal),
+            Message::CloseModal => self.close_modal(),
+            Message::Nothing => {}
             Message::Welcome(allow) => {
                 self.settings.global_hotkeys = Some(allow);
-                self.settings.help_seen = true;
                 self.modal = None;
                 self.save();
             }
+
             Message::Shot(shot) => {
                 if let Some(path) = std::env::var_os("KURO_SHOT") {
                     let _ = save_png(std::path::Path::new(&path), &shot);

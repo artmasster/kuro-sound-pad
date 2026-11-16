@@ -1,9 +1,11 @@
-//! Colours and widget styles. Three looks share one layout: a palette decides everything.
+//! The look: one black piece of hardware. Matte chassis, recessed panels, rubber pads with a light strip, an amber
+//! display. Everything here is colours and widget styles; the layout is in `view.rs`.
 use iced::border::Radius;
 use iced::widget::{button, container, pick_list, progress_bar, scrollable, slider, text_input, toggler};
 use iced::{overlay::menu, Background, Border, Color, Gradient, Shadow, Vector};
+use std::f32::consts::PI;
 
-const fn rgb(hex: u32) -> Color {
+pub const fn rgb(hex: u32) -> Color {
     Color {
         r: ((hex >> 16) & 0xFF) as f32 / 255.0,
         g: ((hex >> 8) & 0xFF) as f32 / 255.0,
@@ -25,385 +27,357 @@ pub fn mix(a: Color, b: Color, t: f32) -> Color {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Palette {
-    pub id: &'static str,
-    pub label: &'static str,
-    /// Window background.
-    pub bg: Color,
-    /// Top bar and sidebar.
-    pub panel: Color,
-    /// Pads, cards, buttons.
-    pub card: Color,
-    pub card_hover: Color,
-    pub line: Color,
-    pub text: Color,
-    pub dim: Color,
-    pub accent: Color,
-    pub on_accent: Color,
-    pub danger: Color,
-    pub on_danger: Color,
-    /// One colour per pad, repeating.
-    pub pad_colors: &'static [Color],
-    /// How many pads in a row share a colour: 4 colours a whole row, 1 gives each pad the next one.
-    pub pad_run: usize,
-    /// Pads are filled with their colour (dark text on top) instead of carrying it as a light strip.
-    pub solid_pads: bool,
-    pub on_pad: Color,
-    pub dark: bool,
-}
+/// The chassis between the panels.
+pub const CHASSIS: Color = rgb(0x08080A);
+pub const PANEL_TOP: Color = rgb(0x19191C);
+pub const PANEL_BOTTOM: Color = rgb(0x111113);
+/// A hole in a panel: fields, list rows, the grooves of faders.
+pub const WELL: Color = rgb(0x0A0A0C);
+pub const EDGE: Color = rgb(0x000000);
+/// The light catching the top of a raised part.
+pub const RIM: Color = rgb(0x2E2E33);
+pub const KEY_TOP: Color = rgb(0x2B2C31);
+pub const KEY_BOTTOM: Color = rgb(0x1C1D21);
+/// Silk-screen print.
+pub const PRINT: Color = rgb(0xECECEF);
+pub const LABEL: Color = rgb(0x85858E);
+pub const FAINT: Color = rgb(0x55555D);
+pub const AMBER: Color = rgb(0xFFB627);
+pub const AMBER_DIM: Color = rgb(0x8F6A22);
+pub const LCD_TOP: Color = rgb(0x0B0904);
+pub const LCD_BOTTOM: Color = rgb(0x17120A);
+pub const RED: Color = rgb(0xFF4438);
+pub const GREEN: Color = rgb(0x3DDC84);
 
-pub const STUDIO: Palette = Palette {
-    id: "studio",
-    label: "สตูดิโอ",
-    bg: rgb(0x111216),
-    panel: rgb(0x16171C),
-    card: rgb(0x1F2127),
-    card_hover: rgb(0x272A31),
-    line: rgb(0x30323B),
-    text: rgb(0xF3F3F5),
-    dim: rgb(0x9C9EA9),
-    accent: rgb(0xFFB020),
-    on_accent: rgb(0x1B1300),
-    danger: rgb(0xE5383B),
-    on_danger: rgb(0xFFFFFF),
-    pad_colors: &[rgb(0xFFB020), rgb(0xFF6B5E), rgb(0x2FE6C8), rgb(0xB45CFF)],
-    pad_run: 4,
-    solid_pads: false,
-    on_pad: rgb(0xF3F3F5),
-    dark: true,
-};
+/// The pad lights a user can pick.
+pub const LEDS: [Color; 8] = [
+    rgb(0xFFB020), // amber
+    rgb(0xFF5E4F), // coral
+    rgb(0xFF4FA3), // pink
+    rgb(0xA868FF), // violet
+    rgb(0x4C8DFF), // blue
+    rgb(0x22D3EE), // cyan
+    rgb(0x3DDC84), // green
+    rgb(0xE8E8EE), // white
+];
 
-pub const NEON: Palette = Palette {
-    id: "neon",
-    label: "นีออน",
-    bg: rgb(0x0A0C0F),
-    panel: rgb(0x0E1014),
-    card: rgb(0x15181D),
-    card_hover: rgb(0x1D2127),
-    line: rgb(0x2B3038),
-    text: rgb(0xF4F6F8),
-    dim: rgb(0x8C929B),
-    accent: rgb(0xC6FF3D),
-    on_accent: rgb(0x0B0D10),
-    danger: rgb(0xF0312F),
-    on_danger: rgb(0xFFFFFF),
-    pad_colors: &[rgb(0xC6FF3D)],
-    pad_run: 1,
-    solid_pads: false,
-    on_pad: rgb(0xF4F6F8),
-    dark: true,
-};
-
-pub const CANDY: Palette = Palette {
-    id: "candy",
-    label: "ลูกกวาด",
-    bg: rgb(0xF6F3EE),
-    panel: rgb(0xFCFAF7),
-    card: rgb(0xFFFFFF),
-    card_hover: rgb(0xF1EDE6),
-    line: rgb(0xD8D2C7),
-    text: rgb(0x1C1C21),
-    dim: rgb(0x6C6C75),
-    accent: rgb(0x14B870),
-    on_accent: rgb(0xFFFFFF),
-    danger: rgb(0xEE3D45),
-    on_danger: rgb(0xFFFFFF),
-    pad_colors: &[rgb(0xFF5F63), rgb(0xFF9A3C), rgb(0xFFD93B), rgb(0x5BE6A0), rgb(0x56B9FF), rgb(0xB976FF)],
-    pad_run: 1,
-    solid_pads: true,
-    on_pad: rgb(0x1C1C21),
-    dark: false,
-};
-
-pub type ButtonStyle = Box<dyn Fn(&iced::Theme, button::Status) -> button::Style>;
-
-pub const PALETTES: [Palette; 3] = [STUDIO, NEON, CANDY];
-
-pub fn palette(id: &str) -> Palette {
-    PALETTES.into_iter().find(|p| p.id == id).unwrap_or(STUDIO)
+/// A pad's light: its own choice, else its row's (amber, coral, cyan, violet).
+pub fn led(choice: Option<u8>, pad: usize) -> Color {
+    let i = choice.map_or([0, 1, 5, 3][(pad / 4) % 4], |c| c as usize);
+    LEDS[i % LEDS.len()]
 }
 
 fn border(color: Color, width: f32, radius: f32) -> Border {
     Border { color, width, radius: Radius::from(radius) }
 }
 
-fn shadow(p: Palette, y: f32, blur: f32) -> Shadow {
-    Shadow { color: alpha(Color::BLACK, if p.dark { 0.45 } else { 0.14 }), offset: Vector::new(0.0, y), blur_radius: blur }
+/// Top-to-bottom gradient.
+fn down(top: Color, bottom: Color) -> Background {
+    Gradient::Linear(iced::gradient::Linear::new(PI).add_stop(0.0, top).add_stop(1.0, bottom)).into()
 }
 
-impl Palette {
-    pub fn pad_color(&self, i: usize) -> Color {
-        self.pad_colors[(i / self.pad_run) % self.pad_colors.len()]
-    }
+fn drop(y: f32, blur: f32, a: f32) -> Shadow {
+    Shadow { color: alpha(Color::BLACK, a), offset: Vector::new(0.0, y), blur_radius: blur }
+}
 
-    pub fn fill(&self, c: Color) -> impl Fn(&iced::Theme) -> container::Style {
-        move |_| container::Style { background: Some(c.into()), ..Default::default() }
-    }
+fn glow(c: Color, blur: f32, a: f32) -> Shadow {
+    Shadow { color: alpha(c, a), offset: Vector::ZERO, blur_radius: blur }
+}
 
-    pub fn bar(&self) -> impl Fn(&iced::Theme) -> container::Style {
-        let p = *self;
-        move |_| container::Style {
-            background: Some(p.panel.into()),
-            text_color: Some(p.text),
-            ..Default::default()
+pub fn fill(c: Color) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_| container::Style { background: Some(c.into()), ..Default::default() }
+}
+
+pub fn dot(c: Color, radius: f32) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_| container::Style { background: Some(c.into()), border: border(Color::TRANSPARENT, 0.0, radius), ..Default::default() }
+}
+
+/// A lit indicator: the colour and its halo.
+pub fn lamp(c: Color, on: bool) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(if on { c } else { mix(c, Color::BLACK, 0.78) }.into()),
+        border: border(alpha(Color::BLACK, 0.8), 1.0, 99.0),
+        shadow: if on { glow(c, 8.0, 0.75) } else { Shadow::default() },
+        ..Default::default()
+    }
+}
+
+pub fn chassis(_: &iced::Theme) -> container::Style {
+    container::Style { background: Some(down(rgb(0x0C0C0E), CHASSIS)), text_color: Some(PRINT), ..Default::default() }
+}
+
+/// A plate screwed onto the chassis.
+pub fn panel(_: &iced::Theme) -> container::Style {
+    container::Style {
+        background: Some(down(PANEL_TOP, PANEL_BOTTOM)),
+        border: border(RIM, 1.0, 10.0),
+        shadow: drop(2.0, 6.0, 0.7),
+        text_color: Some(PRINT),
+    }
+}
+
+/// A recess in a plate.
+pub fn well(_: &iced::Theme) -> container::Style {
+    container::Style { background: Some(WELL.into()), border: border(EDGE, 1.0, 7.0), ..Default::default() }
+}
+
+pub fn lcd(_: &iced::Theme) -> container::Style {
+    container::Style {
+        background: Some(down(LCD_TOP, LCD_BOTTOM)),
+        border: border(EDGE, 2.0, 8.0),
+        text_color: Some(AMBER),
+        shadow: glow(AMBER, 14.0, 0.08),
+    }
+}
+
+pub fn dialog(_: &iced::Theme) -> container::Style {
+    container::Style {
+        background: Some(down(rgb(0x1D1D21), rgb(0x131315))),
+        border: border(rgb(0x3A3A40), 1.0, 12.0),
+        text_color: Some(PRINT),
+        shadow: drop(18.0, 50.0, 0.8),
+    }
+}
+
+pub fn scrim(_: &iced::Theme) -> container::Style {
+    container::Style { background: Some(alpha(Color::BLACK, 0.7).into()), ..Default::default() }
+}
+
+/// The chip that follows the cursor while something is dragged.
+pub fn ghost(c: Color) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(down(KEY_TOP, KEY_BOTTOM)),
+        border: border(c, 1.5, 8.0),
+        text_color: Some(PRINT),
+        shadow: drop(6.0, 16.0, 0.8),
+    }
+}
+
+/// The printed key on a pad.
+pub fn keycap(active: bool) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(if active { AMBER } else { rgb(0x0D0D0F) }.into()),
+        text_color: Some(if active { rgb(0x1A1000) } else { PRINT }),
+        border: border(if active { AMBER } else { rgb(0x3C3C43) }, 1.0, 5.0),
+        ..Default::default()
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct PadLook {
+    pub filled: bool,
+    pub playing: bool,
+    pub selected: bool,
+    pub hover: bool,
+    pub pressed: bool,
+    /// Something dragged is over this pad.
+    pub target: bool,
+    /// This pad is the thing being dragged.
+    pub lifted: bool,
+    pub broken: bool,
+}
+
+/// A rubber pad.
+pub fn pad(color: Color, look: PadLook) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_| {
+        let (mut top, mut bottom) = if look.filled { (rgb(0x2E2F35), rgb(0x1D1E22)) } else { (rgb(0x151517), rgb(0x101012)) };
+        if look.playing {
+            top = mix(top, color, 0.34);
+            bottom = mix(bottom, color, 0.14);
+        } else if look.pressed {
+            // Pushed in: the light comes from below.
+            (top, bottom) = (mix(bottom, Color::BLACK, 0.25), mix(top, Color::BLACK, 0.25));
+        } else if look.hover || look.target {
+            top = mix(top, Color::WHITE, 0.06);
+            bottom = mix(bottom, Color::WHITE, 0.04);
+        }
+        let (line, width) = if look.target {
+            (PRINT, 2.0)
+        } else if look.playing {
+            (color, 2.0)
+        } else if look.selected {
+            (alpha(color, 0.95), 2.0)
+        } else if look.filled {
+            (rgb(0x3B3C42), 1.0)
+        } else {
+            (rgb(0x26262A), 1.0)
+        };
+        let shadow = if look.playing {
+            glow(color, 26.0, 0.55)
+        } else if look.target {
+            glow(PRINT, 16.0, 0.3)
+        } else if look.pressed || !look.filled {
+            Shadow::default()
+        } else {
+            drop(3.0, 6.0, 0.8)
+        };
+        container::Style {
+            background: Some(down(top, bottom)),
+            border: border(line, width, 12.0),
+            shadow,
+            text_color: Some(if look.lifted { alpha(PRINT, 0.35) } else { PRINT }),
         }
     }
+}
 
-    pub fn divider(&self) -> impl Fn(&iced::Theme) -> container::Style {
-        self.fill(self.line)
+/// A library row.
+pub fn row(playing: bool, hover: bool) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(if playing { alpha(AMBER, 0.16) } else if hover { rgb(0x1E1E22) } else { Color::TRANSPARENT }.into()),
+        border: border(if playing { alpha(AMBER, 0.55) } else { Color::TRANSPARENT }, 1.0, 5.0),
+        ..Default::default()
     }
+}
 
-    pub fn rounded(&self, c: Color, radius: f32) -> impl Fn(&iced::Theme) -> container::Style {
-        move |_| container::Style {
-            background: Some(c.into()),
-            border: border(Color::TRANSPARENT, 0.0, radius),
-            ..Default::default()
+pub type ButtonStyle = Box<dyn Fn(&iced::Theme, button::Status) -> button::Style>;
+
+fn key(top: Color, bottom: Color, text: Color, line: Color, radius: f32) -> ButtonStyle {
+    Box::new(move |_, status| {
+        let (t, b, shadow) = match status {
+            button::Status::Hovered => (mix(top, Color::WHITE, 0.08), mix(bottom, Color::WHITE, 0.06), drop(2.0, 4.0, 0.7)),
+            button::Status::Pressed => (mix(bottom, Color::BLACK, 0.2), mix(top, Color::BLACK, 0.2), Shadow::default()),
+            _ => (top, bottom, drop(2.0, 4.0, 0.7)),
+        };
+        let fade = if matches!(status, button::Status::Disabled) { 0.4 } else { 1.0 };
+        button::Style {
+            background: Some(down(alpha(t, fade), alpha(b, fade))),
+            text_color: alpha(text, fade),
+            border: border(line, 1.0, radius),
+            shadow,
         }
-    }
+    })
+}
 
-    /// A panel inside the sidebar or a dialog.
-    pub fn card(&self) -> impl Fn(&iced::Theme) -> container::Style {
-        let p = *self;
-        move |_| container::Style {
-            background: Some(p.card.into()),
-            border: border(p.line, 1.0, 12.0),
-            text_color: Some(p.text),
-            ..Default::default()
+/// A small hardware key.
+pub fn cap() -> ButtonStyle {
+    key(KEY_TOP, KEY_BOTTOM, PRINT, rgb(0x3D3E44), 6.0)
+}
+
+/// A key that is lit: armed, chosen.
+pub fn cap_lit() -> ButtonStyle {
+    key(mix(KEY_TOP, AMBER, 0.45), mix(KEY_BOTTOM, AMBER, 0.3), PRINT, AMBER, 6.0)
+}
+
+pub fn cap_danger() -> ButtonStyle {
+    key(rgb(0x3A1D1D), rgb(0x271314), rgb(0xFF8A80), rgb(0x6A2A2A), 6.0)
+}
+
+pub fn cap_go() -> ButtonStyle {
+    key(mix(AMBER, Color::WHITE, 0.1), mix(AMBER, Color::BLACK, 0.18), rgb(0x1A1000), rgb(0x5A3C00), 6.0)
+}
+
+/// Flat, no body: the little buttons inside list rows and fields.
+pub fn flat() -> ButtonStyle {
+    Box::new(move |_, status| button::Style {
+        background: Some(match status {
+            button::Status::Hovered => rgb(0x2A2A2F),
+            button::Status::Pressed => rgb(0x101012),
+            _ => Color::TRANSPARENT,
+        }.into()),
+        text_color: PRINT,
+        border: border(Color::TRANSPARENT, 0.0, 5.0),
+        shadow: Shadow::default(),
+    })
+}
+
+/// The big stop button; it glows while something plays.
+pub fn stop(live: bool) -> ButtonStyle {
+    Box::new(move |_, status| {
+        let (top, bottom) = match (status, live) {
+            (button::Status::Pressed, _) => (rgb(0x9C1A16), rgb(0xD2362C)),
+            (button::Status::Hovered, _) => (rgb(0xFF6A5C), rgb(0xD92A22)),
+            (_, true) => (rgb(0xFF5548), rgb(0xD0241D)),
+            (_, false) => (rgb(0xB9342C), rgb(0x851915)),
+        };
+        button::Style {
+            background: Some(down(top, bottom)),
+            text_color: Color::WHITE,
+            border: border(rgb(0x2A0605), 2.0, 12.0),
+            shadow: if live { glow(RED, 22.0, 0.6) } else { drop(3.0, 6.0, 0.8) },
         }
-    }
+    })
+}
 
-    pub fn dialog(&self) -> impl Fn(&iced::Theme) -> container::Style {
-        let p = *self;
-        move |_| container::Style {
-            background: Some(p.panel.into()),
-            border: border(p.line, 1.0, 18.0),
-            text_color: Some(p.text),
-            shadow: shadow(p, 16.0, 48.0),
-        }
-    }
+/// A round colour choice; the chosen one gets a ring and a halo.
+pub fn swatch(c: Color, chosen: bool) -> ButtonStyle {
+    Box::new(move |_, status| button::Style {
+        background: Some(if chosen || matches!(status, button::Status::Hovered) { c } else { mix(c, Color::BLACK, 0.45) }.into()),
+        text_color: PRINT,
+        border: border(if chosen { PRINT } else { EDGE }, if chosen { 2.0 } else { 1.0 }, 99.0),
+        shadow: if chosen { glow(c, 10.0, 0.8) } else { Shadow::default() },
+    })
+}
 
-    pub fn scrim(&self) -> impl Fn(&iced::Theme) -> container::Style {
-        let c = if self.dark { alpha(Color::BLACK, 0.62) } else { alpha(rgb(0x2A2620), 0.45) };
-        self.fill(c)
+/// A fader: a groove, lit up to the cap, and a metal cap.
+pub fn fader(color: Color) -> impl Fn(&iced::Theme, slider::Status) -> slider::Style {
+    move |_, status| slider::Style {
+        rail: slider::Rail { backgrounds: (color.into(), WELL.into()), width: 6.0, border: border(EDGE, 1.0, 3.0) },
+        handle: slider::Handle {
+            shape: slider::HandleShape::Rectangle { width: 14, border_radius: Radius::from(3.0) },
+            background: if matches!(status, slider::Status::Active) { rgb(0xC9C9CF) } else { rgb(0xF2F2F5) }.into(),
+            border_width: 1.0,
+            border_color: EDGE,
+        },
     }
+}
 
-    pub fn toast(&self, error: bool) -> impl Fn(&iced::Theme) -> container::Style {
-        let p = *self;
-        move |_| container::Style {
-            background: Some(if error { p.danger } else { p.text }.into()),
-            text_color: Some(if error { p.on_danger } else { p.bg }),
-            border: border(Color::TRANSPARENT, 0.0, 999.0),
-            shadow: shadow(p, 6.0, 20.0),
-        }
-    }
+pub fn strip(bar: Color, track: Color) -> impl Fn(&iced::Theme) -> progress_bar::Style {
+    move |_| progress_bar::Style { background: track.into(), bar: bar.into(), border: border(Color::TRANSPARENT, 0.0, 99.0) }
+}
 
-    /// The small box naming a pad's key.
-    pub fn keycap(&self, on_pad: bool, active: bool) -> impl Fn(&iced::Theme) -> container::Style {
-        let p = *self;
-        move |_| {
-            let (bg, fg, line) = if active {
-                (p.accent, p.on_accent, p.accent)
-            } else if on_pad && p.solid_pads {
-                (alpha(Color::WHITE, 0.92), p.on_pad, alpha(p.on_pad, 0.85))
-            } else {
-                (alpha(p.bg, if p.dark { 0.55 } else { 1.0 }), p.text, if p.dark { mix(p.line, p.text, 0.25) } else { p.text })
-            };
-            container::Style {
-                background: Some(bg.into()),
-                text_color: Some(fg),
-                border: border(line, 1.5, 7.0),
-                ..Default::default()
-            }
-        }
+pub fn input(_: &iced::Theme, status: text_input::Status) -> text_input::Style {
+    text_input::Style {
+        background: WELL.into(),
+        border: border(if matches!(status, text_input::Status::Focused) { AMBER } else { rgb(0x2A2A2F) }, 1.0, 6.0),
+        icon: LABEL,
+        placeholder: FAINT,
+        value: PRINT,
+        selection: alpha(AMBER, 0.4),
     }
+}
 
-    pub fn badge(&self, c: Color, fg: Color) -> impl Fn(&iced::Theme) -> container::Style {
-        move |_| container::Style {
-            background: Some(c.into()),
-            text_color: Some(fg),
-            border: border(Color::TRANSPARENT, 0.0, 5.0),
-            ..Default::default()
-        }
+pub fn pick(_: &iced::Theme, status: pick_list::Status) -> pick_list::Style {
+    pick_list::Style {
+        text_color: PRINT,
+        placeholder_color: FAINT,
+        handle_color: LABEL,
+        background: WELL.into(),
+        border: border(if matches!(status, pick_list::Status::Opened) { AMBER } else { rgb(0x2A2A2F) }, 1.0, 6.0),
     }
+}
 
-    /// A sound pad. `color` is the pad's own colour.
-    pub fn pad(
-        &self,
-        color: Color,
-        filled: bool,
-        playing: bool,
-        selected: bool,
-        broken: bool,
-    ) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
-        let p = *self;
-        move |_, status| {
-            let hover = matches!(status, button::Status::Hovered);
-            let down = matches!(status, button::Status::Pressed);
-            let (bg, text): (Background, Color) = if !filled {
-                (if hover || down { alpha(p.card_hover, 0.9) } else { alpha(p.card, if p.dark { 0.35 } else { 0.5 }) }.into(), p.dim)
-            } else if p.solid_pads {
-                let base = if broken { mix(color, p.bg, 0.6) } else { color };
-                let top = mix(base, Color::WHITE, if down { 0.0 } else if hover { 0.22 } else { 0.1 });
-                let bottom = mix(base, Color::BLACK, if down { 0.1 } else { 0.03 });
-                (Gradient::Linear(iced::gradient::Linear::new(std::f32::consts::PI).add_stop(0.0, top).add_stop(1.0, bottom)).into(), p.on_pad)
-            } else {
-                let lift = if playing { 0.16 } else if down { 0.1 } else if hover { 0.05 } else { 0.0 };
-                let base = mix(p.card, color, lift);
-                let top = mix(base, Color::WHITE, 0.035);
-                let bottom = mix(base, Color::BLACK, 0.12);
-                (Gradient::Linear(iced::gradient::Linear::new(std::f32::consts::PI).add_stop(0.0, top).add_stop(1.0, bottom)).into(), p.on_pad)
-            };
-            let (line, width) = if selected {
-                (p.text, 2.5)
-            } else if playing {
-                (if p.solid_pads { Color::WHITE } else { color }, 2.5)
-            } else if !filled {
-                (if hover { p.dim } else { p.line }, 1.5)
-            } else if p.solid_pads {
-                (alpha(Color::BLACK, 0.08), 1.0)
-            } else {
-                (if hover { mix(p.line, color, 0.45) } else { p.line }, 1.0)
-            };
-            let glow = if playing {
-                Shadow { color: alpha(color, if p.dark { 0.45 } else { 0.55 }), offset: Vector::new(0.0, 0.0), blur_radius: 22.0 }
-            } else if filled {
-                shadow(p, if down { 1.0 } else { 3.0 }, if down { 3.0 } else { 9.0 })
-            } else {
-                Shadow::default()
-            };
-            button::Style { background: Some(bg), text_color: text, border: border(line, width, 14.0), shadow: glow }
-        }
+pub fn menu(_: &iced::Theme) -> menu::Style {
+    menu::Style {
+        background: rgb(0x17171A).into(),
+        border: border(rgb(0x3A3A40), 1.0, 6.0),
+        text_color: PRINT,
+        selected_text_color: rgb(0x1A1000),
+        selected_background: AMBER.into(),
     }
+}
 
-    fn button(&self, bg: Color, fg: Color, line: Color, hover: Color) -> ButtonStyle {
-        let p = *self;
-        Box::new(move |_, status| {
-            let (bg, fg, line) = match status {
-                button::Status::Hovered => (hover, fg, line),
-                button::Status::Pressed => (mix(hover, if p.dark { Color::BLACK } else { p.text }, 0.12), fg, line),
-                button::Status::Disabled => (alpha(bg, 0.4), alpha(fg, 0.4), alpha(line, 0.4)),
-                button::Status::Active => (bg, fg, line),
-            };
-            button::Style { background: Some(bg.into()), text_color: fg, border: border(line, 1.0, 10.0), shadow: Shadow::default() }
-        })
+/// A slide switch: dark when off, lit amber when on.
+pub fn switch(_: &iced::Theme, status: toggler::Status) -> toggler::Style {
+    let on = match status {
+        toggler::Status::Active { is_toggled } | toggler::Status::Hovered { is_toggled } => is_toggled,
+        toggler::Status::Disabled => false,
+    };
+    toggler::Style {
+        background: if on { mix(AMBER, Color::BLACK, 0.25) } else { WELL },
+        background_border_width: 1.0,
+        background_border_color: if on { AMBER } else { rgb(0x34343A) },
+        foreground: if on { Color::WHITE } else { rgb(0x9A9AA2) },
+        foreground_border_width: 1.0,
+        foreground_border_color: EDGE,
     }
+}
 
-    /// The default button: quiet, outlined.
-    pub fn secondary(&self) -> ButtonStyle {
-        self.button(self.card, self.text, self.line, self.card_hover)
-    }
-
-    pub fn primary(&self) -> ButtonStyle {
-        self.button(self.accent, self.on_accent, self.accent, mix(self.accent, Color::WHITE, 0.18))
-    }
-
-    pub fn danger_button(&self) -> ButtonStyle {
-        self.button(self.danger, self.on_danger, self.danger, mix(self.danger, Color::WHITE, 0.14))
-    }
-
-    /// Red text on a quiet button: destructive, but not shouting.
-    pub fn danger_quiet(&self) -> ButtonStyle {
-        let red = if self.dark { mix(self.danger, Color::WHITE, 0.25) } else { self.danger };
-        self.button(alpha(self.danger, 0.1), red, alpha(self.danger, 0.4), alpha(self.danger, 0.2))
-    }
-
-    /// No box until hovered: icon buttons, list rows.
-    pub fn ghost(&self) -> ButtonStyle {
-        self.button(Color::TRANSPARENT, self.text, Color::TRANSPARENT, self.card_hover)
-    }
-
-    /// A button that is "on" (the key being captured, the chosen theme).
-    pub fn selected(&self) -> ButtonStyle {
-        self.button(alpha(self.accent, 0.16), self.text, self.accent, alpha(self.accent, 0.24))
-    }
-
-    pub fn slider(&self, color: Color) -> impl Fn(&iced::Theme, slider::Status) -> slider::Style {
-        let p = *self;
-        move |_, status| slider::Style {
-            rail: slider::Rail {
-                backgrounds: (color.into(), mix(p.line, p.dim, 0.15).into()),
-                width: 6.0,
-                border: border(Color::TRANSPARENT, 0.0, 3.0),
-            },
-            handle: slider::Handle {
-                shape: slider::HandleShape::Circle { radius: if matches!(status, slider::Status::Active) { 8.0 } else { 9.5 } },
-                background: Color::WHITE.into(),
-                border_width: 2.0,
-                border_color: color,
-            },
-        }
-    }
-
-    pub fn meter(&self, bar: Color, track: Color) -> impl Fn(&iced::Theme) -> progress_bar::Style {
-        move |_| progress_bar::Style { background: track.into(), bar: bar.into(), border: border(Color::TRANSPARENT, 0.0, 99.0) }
-    }
-
-    pub fn input(&self) -> impl Fn(&iced::Theme, text_input::Status) -> text_input::Style {
-        let p = *self;
-        move |_, status| text_input::Style {
-            background: p.card.into(),
-            border: border(if matches!(status, text_input::Status::Focused) { p.accent } else { p.line }, 1.5, 10.0),
-            icon: p.dim,
-            placeholder: alpha(p.dim, 0.8),
-            value: p.text,
-            selection: alpha(p.accent, 0.35),
-        }
-    }
-
-    pub fn pick(&self) -> impl Fn(&iced::Theme, pick_list::Status) -> pick_list::Style {
-        let p = *self;
-        move |_, status| pick_list::Style {
-            text_color: p.text,
-            placeholder_color: p.dim,
-            handle_color: p.dim,
-            background: if matches!(status, pick_list::Status::Active) { p.card } else { p.card_hover }.into(),
-            border: border(if matches!(status, pick_list::Status::Opened) { p.accent } else { p.line }, 1.0, 10.0),
-        }
-    }
-
-    pub fn menu(&self) -> impl Fn(&iced::Theme) -> menu::Style {
-        let p = *self;
-        move |_| menu::Style {
-            background: p.card.into(),
-            border: border(p.line, 1.0, 10.0),
-            text_color: p.text,
-            selected_text_color: p.on_accent,
-            selected_background: p.accent.into(),
-        }
-    }
-
-    pub fn toggle(&self) -> impl Fn(&iced::Theme, toggler::Status) -> toggler::Style {
-        let p = *self;
-        move |_, status| {
-            let on = match status {
-                toggler::Status::Active { is_toggled } | toggler::Status::Hovered { is_toggled } => is_toggled,
-                toggler::Status::Disabled => false,
-            };
-            toggler::Style {
-                background: if on { p.accent } else { mix(p.line, p.dim, 0.3) },
-                background_border_width: 0.0,
-                background_border_color: Color::TRANSPARENT,
-                foreground: Color::WHITE,
-                foreground_border_width: 0.0,
-                foreground_border_color: Color::TRANSPARENT,
-            }
-        }
-    }
-
-    pub fn scroll(&self) -> impl Fn(&iced::Theme, scrollable::Status) -> scrollable::Style {
-        let p = *self;
-        move |_, status| {
-            let active = !matches!(status, scrollable::Status::Active);
-            let rail = scrollable::Rail {
-                background: None,
-                border: border(Color::TRANSPARENT, 0.0, 4.0),
-                scroller: scrollable::Scroller {
-                    color: alpha(p.dim, if active { 0.7 } else { 0.35 }),
-                    border: border(Color::TRANSPARENT, 0.0, 4.0),
-                },
-            };
-            scrollable::Style { container: container::Style::default(), vertical_rail: rail, horizontal_rail: rail, gap: None }
-        }
-    }
+pub fn scroll(_: &iced::Theme, status: scrollable::Status) -> scrollable::Style {
+    let active = !matches!(status, scrollable::Status::Active);
+    let rail = scrollable::Rail {
+        background: Some(WELL.into()),
+        border: border(Color::TRANSPARENT, 0.0, 3.0),
+        scroller: scrollable::Scroller { color: if active { rgb(0x6A6A72) } else { rgb(0x3A3A40) }, border: border(Color::TRANSPARENT, 0.0, 3.0) },
+    };
+    scrollable::Style { container: container::Style::default(), vertical_rail: rail, horizontal_rail: rail, gap: None }
 }

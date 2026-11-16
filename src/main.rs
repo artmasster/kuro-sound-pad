@@ -9,9 +9,9 @@ mod settings;
 mod transfer;
 mod ui;
 
-use iced::{window, Size};
+use iced::window;
 
-const TITLE: &str = "Kuro Sound Pad";
+pub const TITLE: &str = "Kuro Sound Pad";
 
 /// One copy at a time: two would both answer every hotkey. The second start brings the first one's window forward.
 #[cfg(windows)]
@@ -54,14 +54,17 @@ fn main() -> iced::Result {
     if std::env::var_os("KURO_ALLOW_SECOND").is_none() && already_running() {
         return Ok(());
     }
-    iced::application(TITLE, ui::App::update, ui::App::view)
-        .subscription(ui::App::subscription)
+    let mut app = iced::application(TITLE, ui::App::update, ui::App::view);
+    for font in ui::fonts() {
+        app = app.font(font);
+    }
+    app.subscription(ui::App::subscription)
         .theme(ui::App::theme)
         .default_font(ui::FONT)
         .antialiasing(true)
         .window(window::Settings {
-            size: Size::new(1220.0, 780.0),
-            min_size: Some(Size::new(980.0, 640.0)),
+            size: ui::WINDOW,
+            min_size: Some(ui::MIN_WINDOW),
             icon: icon(),
             ..Default::default()
         })

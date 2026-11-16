@@ -1,6 +1,6 @@
 [package]
 name = "kuro-sound-pad"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2021"
 description = "Kuro Sound Pad: 16 pads of sounds on global hotkeys"
 authors = ["Art_Masster"]
@@ -12,7 +12,7 @@ name = "kuro-sound-pad"
 path = "src/main.rs"
 
 [dependencies]
-iced = { version = "0.13", default-features = false, features = ["tiny-skia", "svg", "canvas"] }
+iced = { version = "0.13", default-features = false, features = ["tiny-skia", "svg", "advanced"] }
 rodio = { version = "0.20", default-features = false, features = ["symphonia-all"] }
 rfd = { version = "0.15", default-features = false }
 serde = { version = "1", features = ["derive"] }
@@ -23,6 +23,7 @@ png = "0.17"
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",

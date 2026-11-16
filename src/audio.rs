@@ -4,6 +4,7 @@ use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{cpal, Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,6 +41,70 @@ pub enum Event {
     Error(String),
 }
 
+/// The loudest sample sent to the main output since the last look, per channel: what the level meter shows.
+#[derive(Default)]
+pub struct Levels([AtomicU32; 2]);
+
+impl Levels {
+    /// The peaks since the last call, 0 to 1 (left, right), and starts over.
+    pub fn take(&self) -> [f32; 2] {
+        [0, 1].map(|c| self.0[c].swap(0, Ordering::Relaxed) as f32 / 32768.0)
+    }
+}
+
+/// A playing sound on its way to a device: applies the volume (so the meter sees what is really sent) and, on the
+/// main output, feeds the meter.
+struct Voice<S> {
+    inner: S,
+    /// An `f32` volume as bits, shared with the engine so it can change while the sound plays.
+    gain: Arc<AtomicU32>,
+    levels: Option<Arc<Levels>>,
+    channel: u16,
+    channels: u16,
+}
+
+impl<S: Source<Item = i16>> Iterator for Voice<S> {
+    type Item = i16;
+
+    fn next(&mut self) -> Option<i16> {
+        if self.channel == 0 {
+            self.channels = self.inner.channels().max(1);
+        }
+        let sample = self.inner.next()?;
+        let gain = f32::from_bits(self.gain.load(Ordering::Relaxed));
+        let out = (sample as f32 * gain).clamp(-32768.0, 32767.0) as i16;
+        if let Some(levels) = &self.levels {
+            let peak = out.unsigned_abs() as u32;
+            if self.channels == 1 {
+                levels.0[0].fetch_max(peak, Ordering::Relaxed);
+                levels.0[1].fetch_max(peak, Ordering::Relaxed);
+            } else if self.channel < 2 {
+                levels.0[self.channel as usize].fetch_max(peak, Ordering::Relaxed);
+            }
+        }
+        self.channel = (self.channel + 1) % self.channels;
+        Some(out)
+    }
+}
+
+impl<S: Source<Item = i16>> Source for Voice<S> {
+    fn current_frame_len(&self) -> Option<usize> {
+        self.inner.current_frame_len()
+    }
+
+    fn channels(&self) -> u16 {
+        self.inner.channels()
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.inner.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
+}
+
 struct Output {
     /// The device this stream was opened on; for the default device, to notice when the default changes.
     device: Option<String>,
@@ -55,12 +120,16 @@ struct Engine {
     want_monitor: Option<String>,
     main: Option<Output>,
     monitor: Option<Output>,
-    voices: HashMap<Slot, Vec<Sink>>,
+    /// Each playing sound: its sinks (one per device) and the volume they share.
+    voices: HashMap<Slot, (Vec<Sink>, Arc<AtomicU32>)>,
+    levels: Arc<Levels>,
 }
 
 /// Starts the audio thread. `events` is called on that thread.
-pub fn spawn(events: impl Fn(Event) + Send + 'static) -> Sender<Cmd> {
+pub fn spawn(events: impl Fn(Event) + Send + 'static) -> (Sender<Cmd>, Arc<Levels>) {
     let (tx, rx) = mpsc::channel();
+    let levels = Arc::new(Levels::default());
+    let for_engine = levels.clone();
     std::thread::Builder::new()
         .name("audio".into())
         .spawn(move || {
@@ -73,11 +142,12 @@ pub fn spawn(events: impl Fn(Event) + Send + 'static) -> Sender<Cmd> {
                 main: None,
                 monitor: None,
                 voices: HashMap::new(),
+                levels: for_engine,
             }
             .run(rx)
         })
         .expect("audio thread");
-    tx
+    (tx, levels)
 }
 
 fn device_name(d: &cpal::Device) -> Option<String> {
@@ -212,15 +282,13 @@ impl Engine {
 
     fn apply_volume(&mut self, slot: Slot) {
         let v = self.volume(slot);
-        if let Some(sinks) = self.voices.get(&slot) {
-            for s in sinks {
-                s.set_volume(v);
-            }
+        if let Some((_, gain)) = self.voices.get(&slot) {
+            gain.store(v.to_bits(), Ordering::Relaxed);
         }
     }
 
     fn stop(&mut self, slot: Slot) {
-        if let Some(sinks) = self.voices.remove(&slot) {
+        if let Some((sinks, _)) = self.voices.remove(&slot) {
             for s in sinks {
                 s.stop();
             }
@@ -240,11 +308,12 @@ impl Engine {
                 self.reopen();
             }
         }
-        let volume = self.volume(slot);
+        let gain = Arc::new(AtomicU32::new(self.volume(slot).to_bits()));
         let mut sinks = Vec::new();
         let mut seconds = None;
         let mut error = None;
-        for out in [&self.main, &self.monitor].into_iter().flatten() {
+        for (out, metered) in [(&self.main, true), (&self.monitor, false)] {
+            let Some(out) = out else { continue };
             let source = match Decoder::new(Cursor::new(data.clone())) {
                 Ok(s) => s,
                 Err(e) => {
@@ -255,8 +324,13 @@ impl Engine {
             seconds = seconds.or(source.total_duration().map(|d| d.as_secs_f32()));
             match Sink::try_new(&out.handle) {
                 Ok(sink) => {
-                    sink.set_volume(volume);
-                    sink.append(source);
+                    sink.append(Voice {
+                        inner: source,
+                        gain: gain.clone(),
+                        levels: metered.then(|| self.levels.clone()),
+                        channel: 0,
+                        channels: 1,
+                    });
                     sinks.push(sink);
                 }
                 Err(e) => error = Some(format!("เล่นเสียงไม่ได้: {e}")),
@@ -266,13 +340,13 @@ impl Engine {
             (self.events)(Event::Error(error.unwrap_or_else(|| "ไม่มีอุปกรณ์เสียงออก".into())));
             return;
         }
-        self.voices.insert(slot, sinks);
+        self.voices.insert(slot, (sinks, gain));
         (self.events)(Event::Started { slot, seconds });
     }
 
     fn reap(&mut self) {
         let done: Vec<Slot> =
-            self.voices.iter().filter(|(_, sinks)| sinks.iter().all(Sink::empty)).map(|(s, _)| *s).collect();
+            self.voices.iter().filter(|(_, (sinks, _))| sinks.iter().all(Sink::empty)).map(|(s, _)| *s).collect();
         for slot in done {
             self.voices.remove(&slot);
             (self.events)(Event::Ended(slot));
@@ -310,6 +384,25 @@ mod tests {
             }
         }
         assert!(bad.is_empty(), "{bad:#?}");
+    }
+
+    #[test]
+    fn a_voice_applies_its_volume_and_feeds_the_meter() {
+        let levels = Arc::new(Levels::default());
+        let gain = Arc::new(AtomicU32::new(0.5f32.to_bits()));
+        // Stereo: left at full scale, right silent.
+        let source = rodio::buffer::SamplesBuffer::new(2, 44100, vec![20000i16, 0, -20000, 0]);
+        let voice = Voice { inner: source, gain: gain.clone(), levels: Some(levels.clone()), channel: 0, channels: 1 };
+        assert_eq!(voice.collect::<Vec<_>>(), vec![10000, 0, -10000, 0]);
+        let [l, r] = levels.take();
+        assert!((l - 10000.0 / 32768.0).abs() < 1e-4 && r == 0.0);
+        assert_eq!(levels.take(), [0.0, 0.0]);
+        // Mono lights both sides.
+        let mono = rodio::buffer::SamplesBuffer::new(1, 44100, vec![8000i16]);
+        gain.store(1.0f32.to_bits(), Ordering::Relaxed);
+        let _ = Voice { inner: mono, gain, levels: Some(levels.clone()), channel: 0, channels: 1 }.count();
+        let [l, r] = levels.take();
+        assert!(l > 0.2 && l == r);
     }
 
     #[test]

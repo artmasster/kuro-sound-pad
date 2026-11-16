@@ -71,6 +71,7 @@ pub fn export(s: &Settings, path: &Path) -> Result<(), String> {
         "masterVolume": s.master_volume,
         "shortcuts": shortcuts,
         "individualVolumes": s.pads.iter().map(|p| p.volume).collect::<Vec<_>>(),
+        "padColors": s.pads.iter().map(|p| p.color).collect::<Vec<_>>(),
         "exportDate": format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.000Z", t / 3600, t / 60 % 60, t % 60),
         "version": "2.0",
     });
@@ -90,6 +91,7 @@ pub struct ImportedPad {
     pub sound: Option<(String, ImportedSound)>,
     pub volume: u8,
     pub key: Option<Hotkey>,
+    pub color: Option<u8>,
 }
 
 /// A settings file, read and checked but not applied yet: what the confirmation dialog shows.
@@ -168,6 +170,8 @@ pub fn parse(text: &str, lib: &[LibSound]) -> Result<Imported, String> {
         .filter(|a| a.len() == PADS || a.len() == PADS + 1)
         .ok_or_else(|| bad("shortcuts"))?;
     let volumes = doc.get("individualVolumes").and_then(Value::as_array).filter(|a| a.len() == PADS);
+    // Only this app writes colours.
+    let colors = doc.get("padColors").and_then(Value::as_array).filter(|a| a.len() == PADS);
     let key = |v: &Value| v.as_str().and_then(Hotkey::from_legacy);
 
     let mut skipped = 0;
@@ -178,7 +182,8 @@ pub fn parse(text: &str, lib: &[LibSound]) -> Result<Imported, String> {
             None
         });
         let volume = volumes.and_then(|v| v[i].as_f64()).map_or(100, |v| v.clamp(0.0, 100.0).round() as u8);
-        pads.push(ImportedPad { sound, volume, key: key(&shortcuts[i]) });
+        let color = colors.and_then(|c| c[i].as_u64()).filter(|c| *c < 8).map(|c| c as u8);
+        pads.push(ImportedPad { sound, volume, key: key(&shortcuts[i]), color });
     }
     // The same key twice would leave one of them dead: the first pad keeps it.
     for i in 0..PADS {
@@ -217,7 +222,7 @@ impl Imported {
                 Some((name, ImportedSound::Library(file))) => Some(Sound { name, source: Source::Library(file) }),
                 Some((name, ImportedSound::Data(bytes, ext))) => Some(settings::store_sound(&name, &bytes, ext)?),
             };
-            pads.push(Pad { sound, volume: p.volume, key: p.key });
+            pads.push(Pad { sound, volume: p.volume, key: p.key, color: p.color });
         }
         s.pads = pads;
         s.master_volume = self.master_volume;

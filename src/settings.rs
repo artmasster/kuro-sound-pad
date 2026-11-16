@@ -45,11 +45,14 @@ pub struct Pad {
     pub sound: Option<Sound>,
     pub volume: u8,
     pub key: Option<Hotkey>,
+    /// Which of the pad light colours; `None` takes the row's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<u8>,
 }
 
 impl Default for Pad {
     fn default() -> Self {
-        Self { sound: None, volume: 100, key: None }
+        Self { sound: None, volume: 100, key: None, color: None }
     }
 }
 
@@ -58,7 +61,6 @@ impl Default for Pad {
 pub struct Settings {
     pub pads: Vec<Pad>,
     pub master_volume: u8,
-    pub edit_mode: bool,
     pub stop_key: Option<Hotkey>,
     /// Hotkeys while another app has the focus. `None` until the user has answered the first-run question.
     pub global_hotkeys: Option<bool>,
@@ -66,8 +68,6 @@ pub struct Settings {
     pub output_device: Option<String>,
     /// A second device that gets the same sound: a virtual cable into the microphone, usually.
     pub monitor_device: Option<String>,
-    pub theme: String,
-    pub help_seen: bool,
 }
 
 impl Default for Settings {
@@ -75,13 +75,10 @@ impl Default for Settings {
         Self {
             pads: default_pads(),
             master_volume: 100,
-            edit_mode: false,
             stop_key: Some(Hotkey::plain(DEFAULT_STOP_KEY)),
             global_hotkeys: None,
             output_device: None,
             monitor_device: None,
-            theme: "studio".into(),
-            help_seen: false,
         }
     }
 }
@@ -144,6 +141,17 @@ impl Settings {
             None => self.stop_key = Some(key),
         }
         lost
+    }
+
+    /// Two pads trade what they play (sound, volume, colour). The hotkeys belong to the positions and stay.
+    pub fn swap_pads(&mut self, a: usize, b: usize) {
+        if a == b {
+            return;
+        }
+        let (ka, kb) = (self.pads[a].key, self.pads[b].key);
+        self.pads.swap(a, b);
+        self.pads[a].key = ka;
+        self.pads[b].key = kb;
     }
 
     /// Deletes copied sounds no pad uses any more.
@@ -295,6 +303,20 @@ mod tests {
         assert_eq!(s.assign_key(None, k), Some(Some(0)));
         assert_eq!(s.stop_key, Some(k));
         assert_eq!(s.assign_key(None, k), None);
+    }
+
+    #[test]
+    fn swapping_keeps_the_keys_in_place() {
+        let mut s = Settings::default();
+        s.pads[0].sound = Some(Sound { name: "a".into(), source: Source::Library("a.mp3".into()) });
+        s.pads[0].volume = 40;
+        s.pads[0].color = Some(3);
+        let (k0, k5) = (s.pads[0].key, s.pads[5].key);
+        s.swap_pads(0, 5);
+        assert!(s.pads[0].sound.is_none() && s.pads[0].volume == 100 && s.pads[0].color.is_none());
+        assert_eq!(s.pads[5].sound.as_ref().unwrap().name, "a");
+        assert_eq!((s.pads[5].volume, s.pads[5].color), (40, Some(3)));
+        assert_eq!((s.pads[0].key, s.pads[5].key), (k0, k5));
     }
 
     #[test]
