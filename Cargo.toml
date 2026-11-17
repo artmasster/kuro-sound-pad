@@ -1,6 +1,6 @@
 [package]
 name = "kuro-sound-pad"
-version = "2.1.1"
+version = "2.1.2"
 edition = "2021"
 description = "Kuro Sound Pad: 16 pads of sounds on global hotkeys"
 authors = ["Art_Masster"]
