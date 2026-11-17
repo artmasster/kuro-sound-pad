@@ -64,7 +64,7 @@ pub fn export(s: &Settings, path: &Path) -> Result<(), String> {
                 let url = match &sound.source {
                     Source::Library(f) => format!("./sounds/{f}"),
                     Source::File(f) => {
-                        let bytes = std::fs::read(sound.path()).map_err(|e| format!("อ่านเสียง \"{}\" ไม่ได้: {e}", sound.name))?;
+                        let bytes = std::fs::read(settings::sounds_dir().join(f)).map_err(|e| format!("อ่านเสียง \"{}\" ไม่ได้: {e}", sound.name))?;
                         format!("data:{};base64,{}", mime(f), B64.encode(bytes))
                     }
                 };
@@ -277,14 +277,15 @@ mod tests {
 
     #[test]
     fn reads_the_old_apps_exports() {
-        let lib = library::load();
+        let Some(lib) = library::for_tests() else { return };
         for n in [16, 17] {
             let imp = parse(&old_export(n), &lib).unwrap();
             assert_eq!(imp.master_volume, 80);
             assert_eq!(imp.sound_count(), 3);
             assert_eq!(imp.skipped, 1);
-            assert!(matches!(&imp.pads[0].sound, Some((n, ImportedSound::Library(f))) if n == "Vine Boom" && f == "2_vine-boom.mp3"));
-            assert!(matches!(&imp.pads[1].sound, Some((_, ImportedSound::Library(f))) if f == "5_among-us-role-reveal-sound.mp3"));
+            // The old app's addresses lead to the sounds under their names of today.
+            assert!(matches!(&imp.pads[0].sound, Some((n, ImportedSound::Library(f))) if n == "Vine Boom" && f == "002.mp3"));
+            assert!(matches!(&imp.pads[1].sound, Some((_, ImportedSound::Library(f))) if f == "005.mp3"));
             assert!(matches!(&imp.pads[2].sound, Some((n, ImportedSound::Data(_, "wav"))) if n == "my clip"));
             assert_eq!(imp.pads[2].volume, 35);
             assert_eq!(imp.pads[0].key, Some(Hotkey::plain(0x37)));
@@ -297,10 +298,10 @@ mod tests {
 
     #[test]
     fn what_is_exported_imports_again() {
-        let lib = library::load();
+        let Some(lib) = library::for_tests() else { return };
         let mut s = Settings::default();
         s.master_volume = 65;
-        s.pads[0].sound = Some(Sound { name: "Vine Boom".into(), source: Source::Library("2_vine-boom.mp3".into()) });
+        s.pads[0].sound = Some(Sound { name: "Vine Boom".into(), source: Source::Library("002.mp3".into()) });
         s.pads[0].volume = 40;
         s.pads[0].color = Some(6);
         s.pads[3].key = Some(Hotkey { vk: 0x41, ctrl: true, shift: false, alt: true });
@@ -313,7 +314,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(back.master_volume, 65);
         assert_eq!(back.skipped, 0);
-        assert!(matches!(&back.pads[0].sound, Some((n, ImportedSound::Library(f))) if n == "Vine Boom" && f == "2_vine-boom.mp3"));
+        assert!(matches!(&back.pads[0].sound, Some((n, ImportedSound::Library(f))) if n == "Vine Boom" && f == "002.mp3"));
         assert_eq!((back.pads[0].volume, back.pads[0].color), (40, Some(6)));
         assert_eq!(back.pads[3].key, s.pads[3].key);
         assert_eq!(back.pads[1].key, s.pads[1].key);

@@ -370,10 +370,10 @@ mod tests {
 
     #[test]
     fn every_library_sound_decodes() {
-        let dir = crate::settings::library_dir();
+        let Some(list) = crate::library::for_tests() else { return };
         let mut bad = Vec::new();
-        for s in crate::library::load() {
-            let data: Arc<[u8]> = std::fs::read(dir.join(&s.file)).unwrap().into();
+        for s in list {
+            let data: Arc<[u8]> = crate::library::read(&s.file).unwrap().into();
             match Decoder::new(Cursor::new(data)) {
                 Ok(d) => {
                     if d.take(1000).count() == 0 {
@@ -407,10 +407,11 @@ mod tests {
 
     #[test]
     fn measures_a_short_clip() {
-        let dir = crate::settings::library_dir();
-        let data: Arc<[u8]> = std::fs::read(dir.join("2_vine-boom.mp3")).unwrap().into();
-        let seconds = measure(data).unwrap();
-        assert!((0.5..5.0).contains(&seconds), "{seconds}");
         assert!(measure(Arc::from(&b"not audio at all"[..])).is_none());
+        if crate::library::for_tests().is_some() {
+            let data: Arc<[u8]> = crate::library::read("002.mp3").unwrap().into();
+            let seconds = measure(data).unwrap();
+            assert!((0.5..5.0).contains(&seconds), "{seconds}");
+        }
     }
 }

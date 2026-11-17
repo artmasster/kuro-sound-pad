@@ -9,7 +9,8 @@ exactly gets signed). Brings the installer back, checks every signature and writ
 
 Installed copies find a new version through the latest published release: nothing reaches them before -Publish.
 
-Needs: rustup (stable-x86_64-pc-windows-gnu) + WinLibs on PATH for the build, python with Pillow for the installer's
+Needs: library.key (the sound library's key, see src/pack.rs), rustup (stable-x86_64-pc-windows-gnu) + WinLibs on PATH
+for the build, python with Pillow for the installer's
 picture, `ssh siam` with the signing workspace, and for -Upload / -Publish the GitHub CLI logged in.
 #>
 param([switch]$Upload, [switch]$Publish)
@@ -23,6 +24,8 @@ $setup = "KuroSoundPad-$version-win-x64-setup.exe"
 Write-Host "== Kuro Sound Pad $version"
 
 Write-Host '== build'
+# Without the key the app would ship unable to open its own sounds.
+if (-not (Test-Path library.key) -and -not $env:KURO_LIBRARY_KEY) { throw 'library.key is missing: a release needs the sound library key' }
 cargo build --release --locked
 if ($LASTEXITCODE) { throw 'cargo build failed' }
 
@@ -37,7 +40,7 @@ try {
     Copy-Item installer\installer.nsi "$stage\installer"
     Copy-Item build\icon.ico "$stage\build"
     Copy-Item scripts\siam-sign.sh, scripts\siam-package.sh $stage
-    Copy-Item assets\library "$stage\library" -Recurse
+    Copy-Item assets\library.kpk $stage
     python -I scripts\installer-art.py "$stage\art"
     if ($LASTEXITCODE) { throw 'drawing the installer picture failed' }
     tar -cf $pack -C $stage .

@@ -855,7 +855,7 @@ impl App {
                 if self.preview == Some(n) {
                     self.send(Cmd::Stop(Slot::Preview));
                 } else if let Some(s) = self.library.get(n) {
-                    match std::fs::read(settings::library_dir().join(&s.file)) {
+                    match library::read(&s.file) {
                         Ok(bytes) => {
                             self.preview = Some(n);
                             self.preview_pending += 1;

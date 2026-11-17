@@ -311,7 +311,7 @@ impl App {
                 );
             }
             if found == 0 {
-                let why = if library.is_empty() { "ไม่พบโฟลเดอร์คลังเสียง (library) ข้างไฟล์โปรแกรม" } else { "ไม่พบเสียงที่ค้นหา" };
+                let why = if library.is_empty() { "เปิดคลังเสียงไม่ได้ (library.kpk ข้างไฟล์โปรแกรม)" } else { "ไม่พบเสียงที่ค้นหา" };
                 container(hint(why)).padding(12).center_x(Fill).into()
             } else {
                 container(list).padding(Padding { right: 10.0, ..Padding::ZERO }).into()

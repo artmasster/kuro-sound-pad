@@ -1,10 +1,10 @@
 ; Kuro Sound Pad: Windows installer (per user, no administrator prompt).
 ;
-;   makensis -INPUTCHARSET UTF8 -DVERSION=2.1.0 -DEXE_PATH=<kuro-sound-pad.exe> -DLIBRARY_DIR=<assets/library>
+;   makensis -INPUTCHARSET UTF8 -DVERSION=2.1.1 -DEXE_PATH=<kuro-sound-pad.exe> -DLIBRARY_PACK=<assets/library.kpk>
 ;            -DART_DIR=<output of scripts/installer-art.py> -DOUTFILE=<setup.exe> installer/installer.nsi
 ;
 ; Three steps: a first page with one button, the copying, a last page that starts the app. It installs the app and
-; its bundled sounds into %LOCALAPPDATA%\Programs\Kuro Sound Pad. The user's pads and sounds live in
+; its bundled sounds (one sealed file, library.kpk) into %LOCALAPPDATA%\Programs\Kuro Sound Pad. The user's pads and sounds live in
 ; %APPDATA%\Kuro Sound Pad and are never touched, by an update or by the uninstaller.
 ;
 ; The app updates itself by running a newer copy of this installer as `setup.exe /S --updated /D=<its folder>`:
@@ -25,8 +25,8 @@ RequestExecutionLevel user
 !ifndef EXE_PATH
   !error "pass -DEXE_PATH=<path to kuro-sound-pad.exe>"
 !endif
-!ifndef LIBRARY_DIR
-  !error "pass -DLIBRARY_DIR=<path to assets/library>"
+!ifndef LIBRARY_PACK
+  !error "pass -DLIBRARY_PACK=<path to assets/library.kpk>"
 !endif
 !ifndef ART_DIR
   !error "pass -DART_DIR=<folder written by scripts/installer-art.py>"
@@ -210,11 +210,9 @@ Section "Kuro Sound Pad" Main
   SetOutPath "$INSTDIR"
   !insertmacro WaitForApp
   File "/oname=${EXE}" "${EXE_PATH}"
-  ; The bundled sounds are replaced as a whole, so one dropped from a later version does not linger.
+  File "/oname=library.kpk" "${LIBRARY_PACK}"
+  ; Versions before 2.1.1 kept the bundled sounds as a folder of audio files.
   RMDir /r "$INSTDIR\library"
-  SetOutPath "$INSTDIR\library"
-  File "${LIBRARY_DIR}\*.*"
-  SetOutPath "$INSTDIR"
   WriteUninstaller "$INSTDIR\${UNINST}"
 
   CreateShortcut "$SMPROGRAMS\${PRODUCT}.lnk" "$INSTDIR\${EXE}"
@@ -250,6 +248,7 @@ Section "Uninstall"
   !insertmacro WaitForApp
   Delete "$INSTDIR\${EXE}"
   Delete "$INSTDIR\${UNINST}"
+  Delete "$INSTDIR\library.kpk"
   RMDir /r "$INSTDIR\library"
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\${PRODUCT}.lnk"

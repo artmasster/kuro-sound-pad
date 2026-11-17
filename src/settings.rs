@@ -27,15 +27,13 @@ pub struct Sound {
 }
 
 impl Sound {
-    pub fn path(&self) -> PathBuf {
-        match &self.source {
-            Source::Library(f) => library_dir().join(f),
-            Source::File(f) => sounds_dir().join(f),
-        }
-    }
-
+    /// The audio file's bytes: out of the sealed library, or from the copy in the data folder.
     pub fn load(&self) -> Result<Arc<[u8]>, String> {
-        std::fs::read(self.path()).map(Arc::from).map_err(|_| format!("ไม่พบไฟล์เสียงของ \"{}\"", self.name))
+        let bytes = match &self.source {
+            Source::Library(f) => crate::library::read(f).ok(),
+            Source::File(f) => std::fs::read(sounds_dir().join(f)).ok(),
+        };
+        bytes.map(Arc::from).ok_or_else(|| format!("ไม่พบไฟล์เสียงของ \"{}\"", self.name))
     }
 }
 
@@ -196,18 +194,6 @@ fn settings_path() -> PathBuf {
 
 pub fn sounds_dir() -> PathBuf {
     data_dir().join("sounds")
-}
-
-/// The bundled sounds: `library` next to the exe once installed, the repository's `assets/library` while developing.
-pub fn library_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("KURO_LIBRARY_DIR").filter(|d| !d.is_empty()) {
-        return PathBuf::from(d);
-    }
-    let installed = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("library")));
-    match installed {
-        Some(d) if d.is_dir() => d,
-        _ => PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/library")),
-    }
 }
 
 /// A name safe to show and to put in a file name: the old app's rule (drop `<>:"/\|?*`, at most 100 characters).

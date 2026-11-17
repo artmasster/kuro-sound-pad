@@ -6,6 +6,7 @@ mod hotkey;
 mod http;
 mod keys;
 mod library;
+mod pack;
 mod settings;
 mod transfer;
 mod trust;

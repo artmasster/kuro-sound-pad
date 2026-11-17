@@ -42,7 +42,7 @@ cd "$DIR/installer"
 NSISDIR="$DIR/nsis" makensis -V2 -INPUTCHARSET UTF8 \
   "-DVERSION=$VERSION" \
   "-DEXE_PATH=$DIR/kuro-sound-pad.exe" \
-  "-DLIBRARY_DIR=$DIR/library" \
+  "-DLIBRARY_PACK=$DIR/library.kpk" \
   "-DART_DIR=$DIR/art" \
   "-DOUTFILE=$DIR/$SETUP" \
   "-DSIGN_UNINSTALLER=$SIGN" \

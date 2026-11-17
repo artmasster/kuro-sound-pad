@@ -1,6 +1,6 @@
 [package]
 name = "kuro-sound-pad"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2021"
 description = "Kuro Sound Pad: 16 pads of sounds on global hotkeys"
 authors = ["Art_Masster"]
@@ -20,6 +20,9 @@ serde_json = "1"
 base64 = "0.22"
 png = "0.17"
 sha2 = "0.10"
+# The bundled sound library: squeezed, then encrypted (src/pack.rs).
+miniz_oxide = "0.8"
+chacha20poly1305 = "0.10"
 # Updates come over the system's own TLS (Schannel on Windows) and its root store.
 ureq = { version = "3", default-features = false, features = ["native-tls"] }
 
