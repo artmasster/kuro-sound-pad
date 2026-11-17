@@ -1,47 +1,65 @@
-<div align="center">
+<h1 align="center">
+  <img src="build/icon.png" alt="" width="112"><br>
+  Kuro Sound Pad
+</h1>
 
-<img src="build/icon.png" width="96" alt="Kuro Sound Pad icon">
+<p align="center">
+  แผงเสียง 16 ปุ่มหน้าตาแบบเครื่อง DJ กดที่แผงหรือกดปุ่มลัด เสียงออกทันที แม้กำลังอยู่ในเกม
+</p>
 
-# Kuro Sound Pad
+<p align="center">
+  <a href="https://github.com/artmasster/kuro-sound-pad/releases/latest"><img alt="ดาวน์โหลดรุ่นล่าสุด" src="https://img.shields.io/github/v/release/artmasster/kuro-sound-pad?style=for-the-badge&label=Download&color=f5a623"></a>
+</p>
 
-**แผงเสียง 16 ปุ่มหน้าตาแบบเครื่อง DJ กดที่แผงหรือกดปุ่มลัดแล้วเสียงออกทันที แม้กำลังอยู่ในเกมหรือแอปอื่น**
+<p align="center">
+  <img alt="Windows 10 และ 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4">
+  <img alt="เขียนด้วย Rust" src="https://img.shields.io/badge/Made%20with-Rust-dea584">
+  <a href="https://github.com/artmasster/kuro-sound-pad/releases"><img alt="จำนวนดาวน์โหลด" src="https://img.shields.io/github/downloads/artmasster/kuro-sound-pad/total?label=Downloads&color=e5484d"></a>
+</p>
 
-*A 16-pad soundboard for streamers: press a pad or a global hotkey and the sound plays at once, even from inside a game.*
+<p align="center">
+  <b>ไทย</b> · <a href="docs/README.en.md">English</a>
+</p>
 
-[![Release](https://img.shields.io/github/v/release/artmasster/kuro-sound-pad?style=flat-square&color=f5a623)](https://github.com/artmasster/kuro-sound-pad/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/artmasster/kuro-sound-pad/total?style=flat-square&color=e5484d)](https://github.com/artmasster/kuro-sound-pad/releases)
-![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-a5b4fc?style=flat-square)
-![Rust](https://img.shields.io/badge/made%20with-Rust-dea584?style=flat-square)
+<p align="center">
+  <img src="docs/images/banner.webp" alt="แมวดำใส่หูฟังกำลังกดแผงเสียงสีสด มีคลื่นเสียงและโน้ตดนตรีพุ่งออกมา" width="900">
+</p>
 
-<img src="docs/main.png" width="820" alt="หน้าต่าง Kuro Sound Pad: จอแสดงผล ลูกบิด Master ปุ่ม STOP คลังเสียง 16 แผง และการตั้งค่า">
+Kuro Sound Pad คือแผงเสียงสำหรับสตรีมเมอร์และคนที่ชอบแกล้งเพื่อนในห้องคุย ใส่เสียงลงแผง ตั้งปุ่มลัด แล้วกดได้จากทุกที่
+มีคลังเสียง 288 เสียงมาในตัว เปิดครั้งแรกก็มีเสียงพร้อมกดครบ 16 แผง
 
-**[📥 ดาวน์โหลด](#-ดาวน์โหลด)** · [🚀 เริ่มใช้](#-เริ่มใช้) · [🖱️ วิธีใช้](#️-วิธีใช้) · [🔒 ความเป็นส่วนตัว](#-ปุ่มลัดทั่วระบบกับความเป็นส่วนตัว) · [❓ แก้ปัญหา](#-แก้ปัญหา) · [📝 มีอะไรใหม่](#-มีอะไรใหม่)
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="docs/images/feature-hotkey.webp" alt="" width="140"><br>
+      <b>กดจากในเกมได้</b><br>
+      ปุ่มลัดทำงานทั่วระบบ ไม่ต้องสลับหน้าต่างมาที่แอป
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/images/feature-drag-drop.webp" alt="" width="140"><br>
+      <b>ลากวางได้ทุกจุด</b><br>
+      เสียงจากคลัง ไฟล์จากเครื่อง หรือลากแผงไปสลับที่กัน
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/images/feature-mic.webp" alt="" width="140"><br>
+      <b>เพื่อนได้ยินด้วย</b><br>
+      ส่งเสียงออกอีกเครื่องพร้อมกัน เช่น VB-Cable เข้าไมค์ใน Discord
+    </td>
+  </tr>
+</table>
 
-</div>
+<p align="center">
+  <img src="docs/main.png" alt="หน้าต่าง Kuro Sound Pad: จอแสดงผล ลูกบิด Master ปุ่ม STOP คลังเสียง 16 แผง และการตั้งค่า" width="820">
+</p>
 
----
+## ดาวน์โหลด
 
-## ✨ ทำอะไรได้
-
-- 🎛️ **16 แผงเสียง** แต่ละแผงมีชื่อ สีไฟ ระดับเสียง และปุ่มลัดของตัวเอง
-- 🎵 **คลังเสียง 288 เสียง** มากับแอป ค้นหาได้ กดเพื่อฟังก่อน · เปิดครั้งแรกมีเสียงพร้อมกดครบ 16 แผง
-- 📂 **ใส่เสียงของตัวเองได้** MP3, WAV, OGG, M4A, AAC, FLAC (ไม่เกิน 50MB ต่อไฟล์)
-- ⌨️ **ปุ่มลัดทั่วระบบ** ใช้ร่วมกับ Ctrl, Shift, Alt ได้ ไม่ขึ้นกับภาษาแป้นพิมพ์ · มีปุ่มหยุดทุกเสียง
-- 🖱️ **ลากวางได้ทุกจุด** เสียงจากคลัง ไฟล์จากเครื่อง สลับที่แผง หรือไฟล์การตั้งค่า
-- 🎙️ **ส่งเสียงเข้าไมค์ได้** เลือกอุปกรณ์เสียงออก และส่งออกอีกเครื่องพร้อมกัน เช่น VB-Cable เพื่อให้เพื่อนใน Discord ได้ยิน
-- 📟 **จอแสดงผล** บอกเสียงที่กำลังเล่น เวลา และมิเตอร์ระดับเสียงจริงซ้ายขวา
-- 💾 **นำเข้าและส่งออกการตั้งค่า** เป็นไฟล์เดียว เสียงที่เพิ่มเองติดไปด้วย · อ่านไฟล์จาก Sound Pad Studio รุ่นเก่าได้
-- ⬆️ **อัปเดตในแอป** มีรุ่นใหม่แอปจะแจ้งที่มุมขวาล่าง กดครั้งเดียวแล้วดาวน์โหลด ติดตั้ง และเปิดใหม่เอง
-- 🪶 **เบาเครื่อง** เขียนด้วย Rust ทั้งตัว ไม่ใช้ CPU ตอนอยู่เฉยๆ และใช้ราว 2% ของหนึ่งคอร์ตอนเล่นเสียง
-
-## 📥 ดาวน์โหลด
-
-ที่ **[Releases ล่าสุด](https://github.com/artmasster/kuro-sound-pad/releases/latest)** ไฟล์ `KuroSoundPad-x.y.z-win-x64-setup.exe`
+**[ดาวน์โหลดตัวติดตั้งรุ่นล่าสุดจากหน้า Releases](https://github.com/artmasster/kuro-sound-pad/releases/latest)** ไฟล์ `KuroSoundPad-x.y.z-win-x64-setup.exe`
 
 เปิดไฟล์แล้วกด **ติดตั้ง** ครั้งเดียวจบ ใช้กับ Windows 10 / 11 ไม่ต้องใช้สิทธิ์ผู้ดูแลระบบ
 ตัวติดตั้ง ตัวแอป และตัวถอนการติดตั้งลงนามดิจิทัลในชื่อ Pawat Benjaoun
 
-## 🚀 เริ่มใช้
+## เริ่มใช้
 
 1. ลากเสียงจากคลังด้านซ้าย หรือลากไฟล์เสียงจากเครื่อง มาวางบนแผง (กดที่แผงว่างเพื่อเลือกไฟล์ก็ได้)
 2. กดที่แผงหรือกดปุ่มลัดเพื่อเล่น กดซ้ำเพื่อเริ่มใหม่ ปุ่ม **STOP** หยุดทุกเสียง
@@ -49,7 +67,18 @@
 
 ปุ่มลัดเริ่มต้นเรียงตามแป้นพิมพ์: `7 8 9 0` / `U I O P` / `H J K L` / `N M , .` และ `Y` หยุดทุกเสียง
 
-## 🖱️ วิธีใช้
+## ทำอะไรได้บ้าง
+
+- 🎛️ **16 แผงเสียง** แต่ละแผงมีชื่อ สีไฟ ระดับเสียง และปุ่มลัดของตัวเอง
+- 🎵 **คลังเสียง 288 เสียง** มากับแอป ค้นหาได้ กดเพื่อฟังก่อน
+- 📂 **ใส่เสียงของตัวเองได้** MP3, WAV, OGG, M4A, AAC, FLAC (ไม่เกิน 50MB ต่อไฟล์)
+- ⌨️ **ปุ่มลัดทั่วระบบ** ใช้ร่วมกับ Ctrl, Shift, Alt ได้ ไม่ขึ้นกับภาษาแป้นพิมพ์ · มีปุ่มหยุดทุกเสียง
+- 📟 **จอแสดงผล** บอกเสียงที่กำลังเล่น เวลา และมิเตอร์ระดับเสียงจริงซ้ายขวา
+- 💾 **นำเข้าและส่งออกการตั้งค่า** เป็นไฟล์เดียว เสียงที่เพิ่มเองติดไปด้วย · อ่านไฟล์จาก Sound Pad Studio รุ่นเก่าได้
+- ⬆️ **อัปเดตในแอป** มีรุ่นใหม่แอปจะแจ้งที่มุมขวาล่าง กดครั้งเดียวแล้วดาวน์โหลด ติดตั้ง และเปิดใหม่เอง
+- 🪶 **เบาเครื่อง** เขียนด้วย Rust ทั้งตัว ไม่ใช้ CPU ตอนอยู่เฉยๆ และใช้ราว 2% ของหนึ่งคอร์ตอนเล่นเสียง
+
+## วิธีใช้
 
 | ทำอะไร | ผล |
 |---|---|
@@ -67,16 +96,28 @@
 ปุ่มลัดจะพักเองระหว่างที่พิมพ์ในช่องค้นหาหรือช่องชื่อ
 
 <table>
-<tr>
-<td align="center"><b>ลากแผงเพื่อสลับที่</b><br><img src="docs/drag.png" width="400"></td>
-<td align="center"><b>ค้นหาและฟังจากคลังเสียง</b><br><img src="docs/library.png" width="400"></td>
-</tr>
-<tr>
-<td align="center" colspan="2"><b>มีรุ่นใหม่</b><br><img src="docs/update.png" width="400"></td>
-</tr>
+  <tr>
+    <td align="center"><b>ลากแผงเพื่อสลับที่</b><br><img src="docs/drag.png" alt="" width="400"></td>
+    <td align="center"><b>ค้นหาและฟังจากคลังเสียง</b><br><img src="docs/library.png" alt="" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><b>มีรุ่นใหม่</b><br><img src="docs/update.png" alt="" width="400"></td>
+  </tr>
 </table>
 
-## 🔒 ปุ่มลัดทั่วระบบกับความเป็นส่วนตัว
+## ให้เพื่อนใน Discord ได้ยิน
+
+<p align="center">
+  <img src="docs/images/how-it-works.th.svg" alt="กดปุ่มลัดหรือคลิกแผง Kuro Sound Pad ส่งเสียงออกช่อง OUTPUT ไปที่หูฟังของคุณ และส่งออกช่อง MONITOR ไปที่ VB-Cable ซึ่ง Discord ใช้เป็นไมค์" width="900">
+</p>
+
+เสียงออกได้สองทางพร้อมกัน ช่อง **OUTPUT** คือหูฟังหรือลำโพงที่คุณฟังเอง ส่วนช่อง **MONITOR** ไม่บังคับ ใช้ตอนอยากให้คนอื่นได้ยินด้วย
+
+1. ติดตั้ง [VB-Cable](https://vb-audio.com/Cable/)
+2. ในแอป ช่อง **MONITOR** เลือก `CABLE Input`
+3. ใน Discord เลือกไมค์เป็น `CABLE Output`
+
+## ปุ่มลัดทั่วระบบกับความเป็นส่วนตัว
 
 ครั้งแรกที่เปิด แอปจะถามว่าให้ปุ่มลัดทำงานนอกแอปด้วยไหม ถ้าอนุญาต แอปจะเทียบปุ่มที่กดกับปุ่มลัดที่ตั้งไว้เท่านั้น
 **ไม่บันทึก ไม่เก็บ และไม่ส่งการกดปุ่มไปที่ไหน** ปุ่มที่กดยังไปถึงแอปอื่นตามปกติ
@@ -86,20 +127,20 @@
 > แอปต่ออินเทอร์เน็ตเพื่อดูว่ามีรุ่นใหม่บน GitHub เท่านั้น และไม่ดาวน์โหลดอะไรจนกว่าจะกด **อัปเดต**
 > ก่อนติดตั้ง แอปจะตรวจว่าไฟล์ที่ได้มาลงนามโดยผู้เผยแพร่รายเดียวกับตัวแอปเอง กด **ข้ามรุ่นนี้** ถ้าไม่ต้องการรุ่นนั้น
 
-## ❓ แก้ปัญหา
+## แก้ปัญหา
 
 | อาการ | ทำไง |
 |---|---|
 | ปุ่มลัดไม่ทำงานตอนอยู่ในเกม | เปิดสวิตช์ **ปุ่มลัดทั่วระบบ** · ถ้าเกมเปิดแบบ Run as administrator ให้เปิด Kuro Sound Pad แบบเดียวกัน |
 | เสียงดังตอนพิมพ์แชต | ตั้งปุ่มลัดให้ใช้ร่วมกับ Ctrl / Alt หรือปิดสวิตช์ **ปุ่มลัดทั่วระบบ** ชั่วคราว |
-| เพื่อนใน Discord ไม่ได้ยิน | ติดตั้ง VB-Cable → ช่อง **MONITOR** เลือก `CABLE Input` → ใน Discord เลือกไมค์เป็น `CABLE Output` |
+| เพื่อนใน Discord ไม่ได้ยิน | ทำตามหัวข้อ [ให้เพื่อนใน Discord ได้ยิน](#ให้เพื่อนใน-discord-ได้ยิน) |
 | เสียบหูฟังใหม่แล้วไม่ขึ้นในรายการ | กดปุ่มรีเฟรชข้างหัวข้อ **OUTPUT** |
 | ใส่ไฟล์ไม่ได้ | ไฟล์ต้องเป็น MP3, WAV, OGG, M4A, AAC, FLAC และไม่เกิน 50MB |
 | ปุ่มลัดมั่วไปหมด | กด **คืนปุ่มลัด** เพื่อกลับไปใช้ชุดเริ่มต้น |
 
 ถอนการติดตั้ง: **Settings → Apps** · การตั้งค่าและเสียงที่เพิ่มเองอยู่ที่ `%APPDATA%\Kuro Sound Pad`
 
-## 📝 มีอะไรใหม่
+## มีอะไรใหม่
 
 **2.1.2**
 - **ชุดเสียงเริ่มต้น** ติดตั้งใหม่แล้วมีเสียงพร้อมกดครบ 16 แผง
@@ -117,7 +158,7 @@
 ทุกรุ่น: [Releases](https://github.com/artmasster/kuro-sound-pad/releases)
 
 <details>
-<summary><b>🛠️ พัฒนา</b></summary>
+<summary><b>พัฒนา</b></summary>
 
 ต้องมีแค่ [Rust](https://rustup.rs) บน Windows
 
