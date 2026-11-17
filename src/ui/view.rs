@@ -755,18 +755,23 @@ impl App {
             Modal::ConfirmClear => container(
                 column![
                     title("ล้างแผงเสียงทั้งหมด?"),
-                    body("เสียง สี และระดับเสียงของทุกแผงจะถูกลบ ย้อนกลับไม่ได้ ปุ่มลัดและระดับเสียงหลักยังอยู่เหมือนเดิม"),
+                    body("เลือกว่าจะกลับไปใช้ชุดเสียงเริ่มต้น 16 เสียงที่มากับแอป หรือลบเสียงออกจากทุกแผง"),
+                    body("ทั้งสองแบบ เสียง สี และระดับเสียงของแผงตอนนี้จะหายไป ย้อนกลับไม่ได้ ปุ่มลัดและระดับเสียงหลักยังอยู่เหมือนเดิม"),
                     row![
                         horizontal_space(),
                         cancel("ยกเลิก"),
-                        button(key(None, "ล้างทั้งหมด", style::rgb(0xFF8A80))).width(120).padding(8).on_press(Message::ClearAll).style(style::cap_danger()),
+                        button(key(None, "ลบทุกแผง", style::rgb(0xFF8A80))).width(120).padding(8).on_press(Message::ClearAll).style(style::cap_danger()),
+                        button(key(None, "ใช้ชุดเริ่มต้น", style::PRINT)).width(140).padding(8)
+                            // (Without the library there is no starter set to go back to.)
+                            .on_press_maybe((!self.library.is_empty()).then_some(Message::UseStarter))
+                            .style(style::cap_go()),
                     ]
                     .spacing(8),
                 ]
                 .spacing(14),
             )
             .padding(20)
-            .width(430)
+            .width(480)
             .into(),
 
             Modal::Welcome | Modal::Help => {

@@ -51,6 +51,16 @@ pub fn load() -> Vec<LibSound> {
     library().sounds.clone()
 }
 
+/// The sounds the sixteen pads start with on a new installation, and go back to when the user asks for the starter
+/// set: library ids, pad 1 to pad 16.
+pub const STARTER: [u32; 16] = [2, 4, 5, 103, 152, 83, 51, 123, 267, 23, 21, 18, 201, 1, 3, 20];
+
+/// The starter set as (name, file) per pad; `None` where the library has no such sound (or cannot be opened).
+pub fn starter() -> Vec<Option<(String, String)>> {
+    let sounds = &library().sounds;
+    STARTER.iter().map(|id| sounds.iter().find(|s| s.id == *id).map(|s| (s.name.clone(), s.file.clone()))).collect()
+}
+
 /// The audio file behind a library sound, by its name now or one it had before.
 pub fn read(file: &str) -> Result<Vec<u8>, String> {
     let lib = library();
@@ -102,5 +112,16 @@ mod tests {
         assert!(now.len() > 1000 && crate::settings::sniff_extension(&now) == Some("mp3"));
         assert_eq!(read("2_vine-boom.mp3").unwrap(), now);
         assert!(read("not-there.mp3").is_err());
+    }
+
+    #[test]
+    fn the_starter_set_is_sixteen_different_sounds_of_the_library() {
+        let mut ids = STARTER.to_vec();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), 16);
+        if for_tests().is_some() {
+            assert!(starter().iter().all(Option::is_some));
+        }
     }
 }

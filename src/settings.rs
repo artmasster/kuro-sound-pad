@@ -91,12 +91,36 @@ fn default_pads() -> Vec<Pad> {
 
 impl Settings {
     pub fn load() -> Self {
-        let mut s: Settings = std::fs::read(settings_path())
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
+        let mut s: Settings = match std::fs::read(settings_path()) {
+            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+            // Nothing saved yet: a new installation starts with the starter sounds on its pads.
+            Err(_) => {
+                let mut fresh = Settings::default();
+                fresh.use_starter_sounds();
+                fresh
+            }
+        };
         s.normalize();
         s
+    }
+
+    /// Puts the library's starter set on the pads, each at full volume in its row's colour. The hotkeys stay.
+    pub fn use_starter_sounds(&mut self) {
+        self.normalize();
+        for (pad, sound) in self.pads.iter_mut().zip(crate::library::starter()) {
+            pad.sound = sound.map(|(name, file)| Sound { name, source: Source::Library(file) });
+            pad.volume = 100;
+            pad.color = None;
+        }
+    }
+
+    /// Takes every sound off the pads. The hotkeys stay.
+    pub fn clear_sounds(&mut self) {
+        for pad in &mut self.pads {
+            pad.sound = None;
+            pad.volume = 100;
+            pad.color = None;
+        }
     }
 
     /// Whatever the file said, the rest of the app gets 16 pads and volumes in range.
@@ -320,6 +344,28 @@ mod tests {
         assert_eq!(partial.pads.len(), PADS);
         assert_eq!(partial.pads[0].volume, 100);
         assert_eq!(partial.master_volume, 100);
+    }
+
+    #[test]
+    fn the_starter_set_and_clearing_leave_the_hotkeys_alone() {
+        let mut s = Settings::default();
+        let keys: Vec<_> = s.pads.iter().map(|p| p.key).collect();
+        s.pads[0].sound = Some(Sound { name: "mine".into(), source: Source::File("mine.wav".into()) });
+        s.pads[0].volume = 30;
+        s.pads[0].color = Some(4);
+        s.master_volume = 70;
+        s.use_starter_sounds();
+        assert_eq!((s.pads[0].volume, s.pads[0].color), (100, None));
+        assert!(!matches!(&s.pads[0].sound, Some(Sound { source: Source::File(_), .. })), "the pad's own sound is replaced");
+        if crate::library::for_tests().is_some() {
+            assert!(s.pads.iter().all(|p| matches!(&p.sound, Some(Sound { source: Source::Library(_), .. }))));
+            assert_eq!(s.pads[0].sound.as_ref().unwrap().name, "Vine Boom");
+        }
+        assert_eq!(s.pads.iter().map(|p| p.key).collect::<Vec<_>>(), keys);
+        s.clear_sounds();
+        assert!(s.pads.iter().all(|p| p.sound.is_none() && p.volume == 100));
+        assert_eq!(s.pads.iter().map(|p| p.key).collect::<Vec<_>>(), keys);
+        assert_eq!(s.master_volume, 70);
     }
 
     #[test]

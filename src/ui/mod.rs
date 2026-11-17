@@ -128,6 +128,8 @@ pub enum Message {
     ImportFrom(Option<PathBuf>),
     ImportConfirm,
     ClearAll,
+    /// Put the starter sounds back on the pads.
+    UseStarter,
     Open(Modal),
     CloseModal,
     /// Swallows a click (on a dialog, so it does not reach the backdrop).
@@ -603,6 +605,19 @@ impl App {
         self.save();
     }
 
+    /// After every pad's sound was replaced at once (cleared, or the starter set): what was playing stops, the new
+    /// sounds are loaded, copies of sounds no pad uses any more are deleted. As before, the hotkeys and the master
+    /// volume are not touched.
+    fn pads_replaced(&mut self, said: &str) {
+        self.modal = None;
+        self.send(Cmd::StopAll);
+        self.selected = None;
+        self.sync_everything();
+        self.save();
+        self.settings.collect_garbage();
+        self.say(said, false);
+    }
+
     fn first_free(&self) -> Option<usize> {
         (0..PADS).find(|i| self.settings.pads[*i].sound.is_none())
     }
@@ -1012,19 +1027,12 @@ impl App {
                 }
             }
             Message::ClearAll => {
-                // As before: the sounds and their volumes go, the hotkeys and the master volume stay.
-                self.modal = None;
-                self.send(Cmd::StopAll);
-                for p in &mut self.settings.pads {
-                    p.sound = None;
-                    p.volume = 100;
-                    p.color = None;
-                }
-                self.selected = None;
-                self.sync_everything();
-                self.save();
-                self.settings.collect_garbage();
-                self.say("ล้างแผงเสียงทั้งหมดแล้ว", false);
+                self.settings.clear_sounds();
+                self.pads_replaced("ลบเสียงออกจากทุกแผงแล้ว");
+            }
+            Message::UseStarter => {
+                self.settings.use_starter_sounds();
+                self.pads_replaced("กลับไปใช้ชุดเสียงเริ่มต้นแล้ว");
             }
             Message::Open(modal) => self.modal = Some(modal),
             Message::CloseModal => self.close_modal(),
