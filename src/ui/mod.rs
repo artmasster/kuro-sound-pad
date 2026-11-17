@@ -11,6 +11,7 @@ use crate::keys::Hotkey;
 use crate::library::{self, LibSound};
 use crate::settings::{self, Settings, Sound, Source, AUDIO_EXTENSIONS, PADS};
 use crate::transfer::{self, Imported};
+use crate::updater::{self, Outcome, Phase, Release, UpMsg, Updater};
 use iced::futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use iced::{event, keyboard, mouse, window, Event, Point, Size, Subscription, Task};
 use std::collections::HashMap;
@@ -133,6 +134,13 @@ pub enum Message {
     Nothing,
     Welcome(bool),
 
+    /// News from the updater's worker threads.
+    Update(UpMsg),
+    /// Look for a newer version; `true` when the user asked (who then gets an answer either way).
+    UpdateCheck(bool),
+    UpdateNow,
+    UpdateSkip,
+
     /// Development aid: a picture of the window, to check the layout without looking at the screen.
     Shot(window::Screenshot),
 }
@@ -184,6 +192,7 @@ pub struct App {
     typing: bool,
     pub window: Size,
     pub notice: Option<Notice>,
+    pub updater: Updater,
     pub now: Instant,
     /// `KURO_LOG` is set: print what the audio thread reports and what the meter reads.
     log: bool,
@@ -263,14 +272,21 @@ impl App {
     /// What to do right after the window opens: nothing, unless a development aid was asked for.
     pub fn boot(&mut self) -> Task<Message> {
         // `KURO_AUTOPLAY=0,1,h5,h6,stop,2` runs those steps half a second apart: a number plays that pad as its
-        // hotkey would, `h5` moves the mouse onto pad 5 as far as the window can tell, anything else stops all.
+        // hotkey would, `h5` moves the mouse onto pad 5 as far as the window can tell, `check` looks for an update,
+        // `update` accepts the one on offer, `-` waits, anything else stops all.
         if let Ok(script) = std::env::var("KURO_AUTOPLAY") {
             let (audio, events) = (self.audio.clone(), self.events.clone());
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(1500));
                 let mut over = None;
                 for step in script.split(',') {
-                    if let Some(i) = step.strip_prefix('h').and_then(|n| n.parse::<usize>().ok()).filter(|i| *i < PADS) {
+                    if step == "check" {
+                        let _ = events.unbounded_send(Message::UpdateCheck(true));
+                    } else if step == "update" {
+                        let _ = events.unbounded_send(Message::UpdateNow);
+                    } else if step == "-" {
+                        // Just wait.
+                    } else if let Some(i) = step.strip_prefix('h').and_then(|n| n.parse::<usize>().ok()).filter(|i| *i < PADS) {
                         if let Some(old) = over.replace(i) {
                             let _ = events.unbounded_send(Message::PadHover(old, false));
                         }
@@ -286,8 +302,13 @@ impl App {
         }
         // `KURO_SHOT=<png>` saves a picture of the window and quits; `KURO_SHOT_STATE` names what to show.
         if std::env::var_os("KURO_SHOT").is_none() {
+            self.updater.check(false, updater::FIRST_CHECK);
             return Task::none();
         }
+        let offer = |updater: &mut Updater, phase| {
+            updater.release = Some(Release { version: "2.2.0".into(), file: String::new(), sha512: String::new(), size: None });
+            updater.phase = phase;
+        };
         let now = Instant::now();
         self.now = now;
         self.modal = None;
@@ -322,6 +343,11 @@ impl App {
                 "welcome" => self.modal = Some(Modal::Welcome),
                 "help" => self.modal = Some(Modal::Help),
                 "clear" => self.modal = Some(Modal::ConfirmClear),
+                "update" => offer(&mut self.updater, Phase::Available),
+                "downloading" => {
+                    offer(&mut self.updater, Phase::Downloading);
+                    self.updater.percent = 43;
+                }
                 _ => {}
             }
         }
@@ -349,6 +375,10 @@ impl App {
             let _ = capture_tx.unbounded_send(Message::Captured(c));
         });
         let settings_volume = settings.master_volume;
+        let update_tx = tx.clone();
+        let updater = Updater::new(move |m| {
+            let _ = update_tx.unbounded_send(Message::Update(m));
+        });
         let mut app = Self {
             modal: settings.global_hotkeys.is_none().then_some(Modal::Welcome),
             settings,
@@ -379,6 +409,7 @@ impl App {
             typing: false,
             window: WINDOW,
             notice: None,
+            updater,
             now: Instant::now(),
             log,
             shot_in: None,
@@ -414,6 +445,10 @@ impl App {
         // the window does no work at all.
         if !self.playing.is_empty() || self.notice.is_some() || self.shot_in.is_some() || self.meter.iter().any(|m| *m > 0.001) {
             subs.push(iced::time::every(TICK).map(Message::Frame));
+        }
+        // An installed copy looks for a newer version once an hour.
+        if self.updater.supported() {
+            subs.push(iced::time::every(updater::CHECK_EVERY).map(|_| Message::UpdateCheck(false)));
         }
         Subscription::batch(subs)
     }
@@ -600,6 +635,8 @@ impl App {
                 | Message::PadHover(..)
                 | Message::RowHover(..)
                 | Message::KnobHover(_)
+                | Message::Update(_)
+                | Message::UpdateCheck(false)
         );
         if !passive {
             self.stop_capture();
@@ -989,6 +1026,36 @@ impl App {
                 self.settings.global_hotkeys = Some(allow);
                 self.modal = None;
                 self.save();
+            }
+
+            Message::Update(news) => match self.updater.on(news) {
+                Outcome::Found(version) => {
+                    if self.settings.skip_version.as_deref() != Some(version.as_str()) {
+                        self.say(format!("มีรุ่นใหม่ {version} · กดอัปเดตได้ที่มุมขวาล่าง"), false);
+                    }
+                }
+                Outcome::UpToDate => self.say(concat!("เป็นรุ่นล่าสุดแล้ว (", env!("CARGO_PKG_VERSION"), ")"), false),
+                Outcome::CheckFailed(e) => self.say(format!("ตรวจหารุ่นใหม่ไม่ได้: {e}"), true),
+                Outcome::Run(installer) => match updater::run(&installer) {
+                    // The installer waits for this app to close, then starts the new version.
+                    Ok(()) => return iced::exit(),
+                    Err(e) => self.updater.fail(e),
+                },
+                Outcome::Nothing => {}
+            },
+            Message::UpdateCheck(asked) => {
+                // Asking again brings back a version that was skipped.
+                if asked && self.settings.skip_version.take().is_some() {
+                    self.save();
+                }
+                self.updater.check(asked, Duration::ZERO);
+            }
+            Message::UpdateNow => self.updater.download(),
+            Message::UpdateSkip => {
+                if let Some(release) = &self.updater.release {
+                    self.settings.skip_version = Some(release.version.clone());
+                    self.save();
+                }
             }
 
             Message::Shot(shot) => {

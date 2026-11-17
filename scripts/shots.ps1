@@ -5,10 +5,10 @@ Pictures of the window in its main states, for checking the layout without looki
     pwsh -Command "& scripts\shots.ps1 -States 'drag','playing,select'"
 
 A state is one or more of the names `App::boot` knows (select, empty, playing, preview, search, capture, drag, swap,
-error, welcome, help, clear), joined by commas. Uses the settings in target\live-data (so the real ones are never
-touched) and the debug build.
+error, welcome, help, clear, update, downloading), joined by commas. Uses the settings in target\live-data (so the
+real ones are never touched) and the debug build.
 #>
-param([string[]]$States = @('main', 'playing,select', 'empty', 'drag', 'swap', 'capture', 'search,preview', 'error', 'welcome', 'help', 'clear'))
+param([string[]]$States = @('main', 'playing,select', 'empty', 'drag', 'swap', 'capture', 'search,preview', 'error', 'welcome', 'help', 'clear', 'update', 'downloading'))
 $root = Split-Path $PSScriptRoot -Parent
 $exe = Join-Path $root 'target\debug\kuro-sound-pad.exe'
 $out = Join-Path $root 'target\shots'

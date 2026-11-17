@@ -1,97 +1,90 @@
 <#
-Signed Windows release: builds the exe here, signs it on the Siam host (`ssh siam`, SSL.com eSigner certificate of
-Pawat Benjaoun, through siam-sign.sh), builds the installer there with the uninstaller signed as makensis writes it,
-signs the installer, brings both back, checks the signatures and zips a portable copy.
+Signed Windows release: builds the app here, then on the Siam host (`ssh siam`, SSL.com eSigner certificate of
+Pawat Benjaoun) signs it, builds the installer around it and signs that too (scripts/siam-package.sh says what
+exactly gets signed). Brings the installer back, checks every signature and writes the update feed for it.
 
-    pwsh scripts\release-windows.ps1              # dist\KuroSoundPad-<ver>-win-x64-setup.exe + -portable.zip
-    pwsh scripts\release-windows.ps1 -Upload      # also uploads both to the GitHub release v<ver> (created as a draft if missing)
+    pwsh scripts\release-windows.ps1              # dist\KuroSoundPad-<ver>-win-x64-setup.exe + dist\latest.yml
+    pwsh scripts\release-windows.ps1 -Upload      # also uploads both to the GitHub release v<ver> (a draft if new)
+    pwsh scripts\release-windows.ps1 -Publish     # uploads, then publishes the release as the latest
 
-Needs: rustup (stable-x86_64-pc-windows-gnu) + WinLibs on PATH for the build, `ssh siam` with the signing workspace,
-and for -Upload the GitHub CLI logged in.
+Installed copies find a new version through the latest published release: nothing reaches them before -Publish.
+
+Needs: rustup (stable-x86_64-pc-windows-gnu) + WinLibs on PATH for the build, python with Pillow for the installer's
+picture, `ssh siam` with the signing workspace, and for -Upload / -Publish the GitHub CLI logged in.
 #>
-param([switch]$Upload)
+param([switch]$Upload, [switch]$Publish)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
+$repo = 'artmasster/kuro-sound-pad'
+$publisher = 'Pawat Benjaoun'
 $version = (Select-String Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
 $setup = "KuroSoundPad-$version-win-x64-setup.exe"
-$portable = "KuroSoundPad-$version-win-x64-portable.zip"
 Write-Host "== Kuro Sound Pad $version"
 
 Write-Host '== build'
 cargo build --release --locked
 if ($LASTEXITCODE) { throw 'cargo build failed' }
 
-Write-Host '== sign on the Siam host'
-# The Siam host rate-limits SSH (about 6 connections per 30 s), so this uses four: upload, sign + package,
-# download, clean up.
+Write-Host '== everything the Siam host needs, in one file'
 $id = -join ((48..57) + (97..122) | Get-Random -Count 10 | ForEach-Object { [char]$_ })
-$remote = "/tmp/ksp-release-$id"
 $stage = Join-Path $root "target\release-stage-$id"
-New-Item -ItemType Directory -Force $stage | Out-Null
-Copy-Item target\release\kuro-sound-pad.exe "$stage\ksp-$id-kuro-sound-pad.exe"
-Copy-Item installer\installer.nsi "$stage\ksp-$id-installer.nsi"
-Copy-Item build\icon.ico "$stage\ksp-$id-icon.ico"
-Copy-Item scripts\siam-sign.sh "$stage\ksp-$id-siam-sign.sh"
-tar -cf "$stage\ksp-$id-library.tar" -C assets library
-if ($LASTEXITCODE) { throw 'packing the sound library failed' }
-$steps = @(
-    'set -e',
-    "mkdir -p $remote/installer $remote/build",
-    "mv /tmp/ksp-$id-kuro-sound-pad.exe $remote/kuro-sound-pad.exe",
-    "mv /tmp/ksp-$id-installer.nsi $remote/installer/installer.nsi",
-    "mv /tmp/ksp-$id-icon.ico $remote/build/icon.ico",
-    "mv /tmp/ksp-$id-siam-sign.sh $remote/siam-sign.sh",
-    "tar -xf /tmp/ksp-$id-library.tar -C $remote",
-    "bash $remote/siam-sign.sh $remote/kuro-sound-pad.exe",
-    "cd $remote/installer",
-    "makensis -V2 -DVERSION=$version -DEXE_PATH=$remote/kuro-sound-pad.exe -DLIBRARY_DIR=$remote/library -DOUTFILE=$remote/$setup '-DSIGN_UNINSTALLER=bash $remote/siam-sign.sh' installer.nsi",
-    "bash $remote/siam-sign.sh $remote/$setup",
-    ''
-) -join "`n"
-# LF line endings: the steps run under bash on the host.
-[IO.File]::WriteAllText("$stage\ksp-$id-steps.sh", $steps)
+$pack = Join-Path $root "target\ksp-$id.tar"
+$remote = "/tmp/ksp-release-$id"
+New-Item -ItemType Directory -Force "$stage\installer", "$stage\build" | Out-Null
 try {
-    scp -q (Get-ChildItem $stage).FullName 'siam:/tmp/'
+    Copy-Item target\release\kuro-sound-pad.exe $stage
+    Copy-Item installer\installer.nsi "$stage\installer"
+    Copy-Item build\icon.ico "$stage\build"
+    Copy-Item scripts\siam-sign.sh, scripts\siam-package.sh $stage
+    Copy-Item assets\library "$stage\library" -Recurse
+    python -I scripts\installer-art.py "$stage\art"
+    if ($LASTEXITCODE) { throw 'drawing the installer picture failed' }
+    tar -cf $pack -C $stage .
+    if ($LASTEXITCODE) { throw 'packing failed' }
+
+    Write-Host '== sign and package on the Siam host'
+    # The Siam host rate-limits SSH (about 6 connections per 30 s), so this uses four: upload, sign + package,
+    # download, clean up.
+    scp -q $pack "siam:/tmp/ksp-$id.tar"
     if ($LASTEXITCODE) { throw 'upload failed' }
-    ssh siam "bash /tmp/ksp-$id-steps.sh"
+    ssh siam "mkdir -p $remote && tar -xf /tmp/ksp-$id.tar -C $remote && bash $remote/siam-package.sh $version $setup"
     if ($LASTEXITCODE) { throw 'signing or packaging on the Siam host failed' }
-    New-Item -ItemType Directory -Force dist | Out-Null
-    scp -q "siam:$remote/$setup" "siam:$remote/kuro-sound-pad.exe" $stage
+    scp -q -r "siam:$remote/$setup" "siam:$remote/signed" $stage
     if ($LASTEXITCODE) { throw 'download failed' }
+
+    Write-Host '== check signatures'
+    # The uninstaller is not among these: it only exists once installed. makensis stops the build if signing it fails.
+    $files = @("$stage\$setup") + (Get-ChildItem "$stage\signed" -File).FullName
+    foreach ($f in $files) {
+        $s = Get-AuthenticodeSignature $f
+        Write-Host ("{0}: {1} ({2})" -f (Split-Path $f -Leaf), $s.Status, $s.SignerCertificate.Subject)
+        if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch "CN=$publisher(,|$)") { throw "$f is not validly signed by $publisher" }
+    }
+    New-Item -ItemType Directory -Force dist | Out-Null
     Copy-Item "$stage\$setup" "dist\$setup" -Force
-    Copy-Item "$stage\kuro-sound-pad.exe" "dist\kuro-sound-pad-$version-signed.exe" -Force
 }
 finally {
-    ssh siam "rm -rf $remote /tmp/ksp-$id-*"
+    ssh siam "rm -rf $remote /tmp/ksp-$id.tar"
     Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
+    Remove-Item -Force $pack -ErrorAction SilentlyContinue
 }
 
-Write-Host '== check signatures'
-foreach ($f in "dist\$setup", "dist\kuro-sound-pad-$version-signed.exe") {
-    $s = Get-AuthenticodeSignature $f
-    Write-Host ("{0}: {1} ({2})" -f (Split-Path $f -Leaf), $s.Status, $s.SignerCertificate.Subject)
-    if ($s.Status -ne 'Valid') { throw "$f is not validly signed" }
-}
+Write-Host '== latest.yml'
+python -I scripts\latest-yml.py $version dist\latest.yml "dist\$setup"
+if ($LASTEXITCODE) { throw 'writing latest.yml failed' }
+Get-Item "dist\$setup" | ForEach-Object { Write-Host ("{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB)) }
 
-Write-Host '== portable zip'
-# The signed exe with the sounds next to it: unzip anywhere and run.
-$folder = "dist\portable\Kuro Sound Pad"
-Remove-Item -Recurse -Force dist\portable -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force $folder | Out-Null
-Copy-Item "dist\kuro-sound-pad-$version-signed.exe" "$folder\Kuro Sound Pad.exe"
-Copy-Item assets\library "$folder\library" -Recurse
-Remove-Item "dist\$portable" -ErrorAction SilentlyContinue
-Compress-Archive -Path $folder -DestinationPath "dist\$portable" -CompressionLevel Optimal
-Remove-Item -Recurse -Force dist\portable
-Get-ChildItem dist | ForEach-Object { Write-Host ("{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB)) }
-
-if ($Upload) {
-    gh release view "v$version" --repo artmasster/kuro-sound-pad *> $null
+if ($Upload -or $Publish) {
+    gh release view "v$version" --repo $repo *> $null
     if ($LASTEXITCODE) {
-        gh release create "v$version" --draft --title "Kuro Sound Pad $version" --notes '' --repo artmasster/kuro-sound-pad
+        gh release create "v$version" --draft --title "Kuro Sound Pad $version" --notes '' --repo $repo
         if ($LASTEXITCODE) { throw 'creating the release failed' }
     }
-    gh release upload "v$version" "dist\$setup" "dist\$portable" --clobber --repo artmasster/kuro-sound-pad
+    gh release upload "v$version" "dist\$setup" dist\latest.yml --clobber --repo $repo
     if ($LASTEXITCODE) { throw 'upload failed' }
+}
+if ($Publish) {
+    gh release edit "v$version" --draft=false --latest --repo $repo
+    if ($LASTEXITCODE) { throw 'publish failed' }
 }

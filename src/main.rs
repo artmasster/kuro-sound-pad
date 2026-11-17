@@ -3,11 +3,14 @@
 
 mod audio;
 mod hotkey;
+mod http;
 mod keys;
 mod library;
 mod settings;
 mod transfer;
+mod trust;
 mod ui;
+mod updater;
 
 use iced::window;
 

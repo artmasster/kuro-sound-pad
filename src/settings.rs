@@ -68,6 +68,9 @@ pub struct Settings {
     pub output_device: Option<String>,
     /// A second device that gets the same sound: a virtual cable into the microphone, usually.
     pub monitor_device: Option<String>,
+    /// A newer version the user chose not to be offered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_version: Option<String>,
 }
 
 impl Default for Settings {
@@ -79,6 +82,7 @@ impl Default for Settings {
             global_hotkeys: None,
             output_device: None,
             monitor_device: None,
+            skip_version: None,
         }
     }
 }

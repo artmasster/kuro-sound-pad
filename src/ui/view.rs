@@ -6,6 +6,7 @@ use super::{App, Carried, DeviceChoice, Message, Modal, Target};
 use crate::audio::Slot;
 use crate::keys::Hotkey;
 use crate::settings::PADS;
+use crate::updater::Phase;
 use iced::alignment::{Horizontal, Vertical};
 use iced::font::{Family, Weight};
 use iced::mouse::Interaction;
@@ -612,11 +613,28 @@ impl App {
         ]
         .spacing(8);
 
+        // The version: on an installed copy it is also the button that looks for a newer one.
+        let version = concat!("v", env!("CARGO_PKG_VERSION"));
+        let version: El = if !self.updater.supported() {
+            hint(version).color(style::FAINT).into()
+        } else if self.updater.phase == Phase::Checking {
+            hint("กำลังตรวจหารุ่นใหม่…").color(style::FAINT).into()
+        } else {
+            button(row![hint(version), icon(icons::REFRESH, 11.0, style::LABEL)].spacing(5).align_y(Alignment::Center))
+                .padding(Padding::from([3, 6]))
+                .on_press(Message::UpdateCheck(true))
+                .style(style::flat())
+                .into()
+        };
+        let mut parts = column![scrollable(container(content).padding(Padding { right: 10.0, ..Padding::ZERO })).height(Fill).style(style::scroll)]
+            .spacing(6);
+        if let Some(update) = self.update_block() {
+            parts = parts.push(container(update).padding(Padding { right: 6.0, ..Padding::ZERO }));
+        }
         container(
-            column![
-                scrollable(container(content).padding(Padding { right: 10.0, ..Padding::ZERO })).height(Fill).style(style::scroll),
+            parts.push(
                 row![
-                    hint(concat!("v", env!("CARGO_PKG_VERSION"))).color(style::FAINT),
+                    version,
                     horizontal_space(),
                     button(row![icon(icons::HELP, 12.0, style::LABEL), hint("วิธีใช้")].spacing(5).align_y(Alignment::Center))
                         .padding(Padding::from([3, 6]))
@@ -624,14 +642,56 @@ impl App {
                         .style(style::flat()),
                 ]
                 .align_y(Alignment::Center),
-            ]
-            .spacing(6),
+            ),
         )
         .padding(Padding { top: 12.0, right: 6.0, bottom: 8.0, left: 12.0 })
         .width(Fill)
         .height(Fill)
         .style(style::panel)
         .into()
+    }
+
+    /// A newer version on offer, or how its download is going. Nothing while there is nothing to say.
+    fn update_block(&self) -> Option<El<'_>> {
+        let up = &self.updater;
+        let version = up.release.as_ref().map_or("", |r| r.version.as_str());
+        let body: El = match up.phase {
+            Phase::Available if self.settings.skip_version.as_deref() != Some(version) => column![
+                row![
+                    container(Space::new(9, 9)).style(style::lamp(style::AMBER, true)),
+                    t(format!("มีรุ่นใหม่ {version}")).font(SEMI).size(13.5).color(style::PRINT),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
+                row![
+                    button(key(None, "ข้ามรุ่นนี้", style::PRINT)).width(Fill).padding(6).on_press(Message::UpdateSkip).style(style::cap()),
+                    button(key(Some(icons::IMPORT), "อัปเดต", style::rgb(0x1A1000))).width(Fill).padding(6).on_press(Message::UpdateNow).style(style::cap_go()),
+                ]
+                .spacing(8),
+            ]
+            .spacing(8)
+            .into(),
+            Phase::Downloading => column![
+                row![
+                    t(format!("กำลังดาวน์โหลด {version}")).size(12.5).color(style::PRINT),
+                    horizontal_space(),
+                    t(format!("{}%", up.percent)).font(TECH).size(12).color(style::AMBER),
+                ]
+                .align_y(Alignment::Center),
+                progress_bar(0.0..=100.0, up.percent as f32).height(5).style(style::strip(style::AMBER, style::rgb(0x2A2418))),
+            ]
+            .spacing(7)
+            .into(),
+            Phase::Installing => t("กำลังติดตั้ง แอปจะเปิดขึ้นมาใหม่เอง").size(12.5).color(style::AMBER).into(),
+            Phase::Failed => column![
+                t(format!("อัปเดตไม่สำเร็จ: {}", up.error.as_deref().unwrap_or_default())).size(12).color(style::RED),
+                button(key(Some(icons::REFRESH), "ลองอีกครั้ง", style::PRINT)).width(Fill).padding(6).on_press(Message::UpdateNow).style(style::cap()),
+            ]
+            .spacing(8)
+            .into(),
+            _ => return None,
+        };
+        Some(container(body).padding(10).width(Fill).style(style::well).into())
     }
 
     // ---- the few dialogs left ---------------------------------------------------------------------------------

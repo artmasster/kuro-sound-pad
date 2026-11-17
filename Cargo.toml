@@ -19,12 +19,19 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
 png = "0.17"
+sha2 = "0.10"
+# Updates come over the system's own TLS (Schannel on Windows) and its root store.
+ureq = { version = "3", default-features = false, features = ["native-tls"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Security",
+    "Win32_Security_Cryptography",
+    "Win32_Security_Cryptography_Catalog",
+    "Win32_Security_Cryptography_Sip",
+    "Win32_Security_WinTrust",
     "Win32_System_LibraryLoader",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
@@ -48,3 +55,9 @@ opt-level = 2
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# tiny-skia's anti-aliased rect fill debug-asserts on a rect that covers two partial pixels and no whole one (a thin
+# line at some offsets). Nothing is wrong there and release builds compile the assert out, but it takes a test build
+# down.
+[profile.dev.package.tiny-skia]
+debug-assertions = false
