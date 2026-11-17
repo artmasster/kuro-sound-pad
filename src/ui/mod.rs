@@ -273,7 +273,8 @@ impl App {
     pub fn boot(&mut self) -> Task<Message> {
         // `KURO_AUTOPLAY=0,1,h5,h6,stop,2` runs those steps half a second apart: a number plays that pad as its
         // hotkey would, `h5` moves the mouse onto pad 5 as far as the window can tell, `check` looks for an update,
-        // `update` accepts the one on offer, `-` waits, anything else stops all.
+        // `update` accepts the one on offer, `m0+4` changes the lengths shown on those pads together, `-` waits,
+        // anything else stops all.
         if let Ok(script) = std::env::var("KURO_AUTOPLAY") {
             let (audio, events) = (self.audio.clone(), self.events.clone());
             std::thread::spawn(move || {
@@ -284,6 +285,12 @@ impl App {
                         let _ = events.unbounded_send(Message::UpdateCheck(true));
                     } else if step == "update" {
                         let _ = events.unbounded_send(Message::UpdateNow);
+                    } else if let Some(pads) = step.strip_prefix('m') {
+                        // `m0+4`: those pads' lengths change at the same moment, as when their sounds finish
+                        // being measured together after start-up (each pad has been loaded once by then).
+                        for i in pads.split('+').filter_map(|n| n.parse::<usize>().ok()).filter(|i| *i < PADS) {
+                            let _ = events.unbounded_send(Message::Measured(i, 1, Some(9.9)));
+                        }
                     } else if step == "-" {
                         // Just wait.
                     } else if let Some(i) = step.strip_prefix('h').and_then(|n| n.parse::<usize>().ok()).filter(|i| *i < PADS) {

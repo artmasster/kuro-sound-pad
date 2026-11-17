@@ -42,6 +42,11 @@ windows = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
+# iced's software renderer, version 0.13.0 as published, with one fix (marked "Kuro Sound Pad" in src/engine.rs):
+# centred text lost its left side when only part of the window was repainted.
+[patch.crates-io]
+iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
+
 [build-dependencies]
 embed-resource = "3"
 
